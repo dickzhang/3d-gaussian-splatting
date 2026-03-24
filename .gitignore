@@ -1,6 +1,7 @@
 .vs/
 build/
 build-local/
+build-vs2022/
 *.user
 *.VC.db
 *.opendb

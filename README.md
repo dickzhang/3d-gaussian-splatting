@@ -85,10 +85,5 @@ cmake --build build-local --config Release
 
 - `assets/configs/model_path.txt`
 
-填入待加载的 `.ply` 绝对路径或相对路径。
-
 ---
 
-## 当前对齐目标
-
-当前工作重点为：与 Unity 插件渲染链路进行观感对齐（排序、混合、SH、泼溅形状与合成路径）。
