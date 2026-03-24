@@ -1,0 +1,53 @@
+#version 430 core
+
+layout(local_size_x = 256, local_size_y = 1, local_size_z = 1) in;
+
+struct GPUSplat {
+    vec4 posOpacity;
+    vec4 scalePad;
+    vec4 rotation;
+    vec4 colorRadius;
+    uint shPacked[24];
+};
+
+layout(std430, binding = 0) readonly buffer SplatBuffer {
+    GPUSplat splats[];
+};
+
+layout(std430, binding = 1) writeonly buffer KeyBuffer {
+    uint keys[];
+};
+
+layout(std430, binding = 2) writeonly buffer IndexBuffer {
+    uint indices[];
+};
+
+uniform mat4 u_view;
+uniform uint u_realCount;
+uniform uint u_sortCount;
+uniform uint u_frontToBack;
+
+void main() {
+    uint id = gl_GlobalInvocationID.x;
+    if (id >= u_sortCount) {
+        return;
+    }
+
+    if (id >= u_realCount) {
+        keys[id] = 0xFFFFFFFFu;
+        indices[id] = 0xFFFFFFFFu;
+        return;
+    }
+
+    vec3 pos = splats[id].posOpacity.xyz;
+    vec4 viewPos = u_view * vec4(pos, 1.0);
+
+    float depth = max(0.0, -viewPos.z);
+    uint bits = floatBitsToUint(depth);
+
+    // Bitonic sort is ascending.
+    // front-to-back: smaller depth first.
+    // back-to-front: larger depth first via key inversion.
+    keys[id] = (u_frontToBack != 0u) ? bits : (~bits);
+    indices[id] = id;
+}

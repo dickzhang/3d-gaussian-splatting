@@ -1,0 +1,6 @@
+.vs/
+build/
+build-local/
+*.user
+*.VC.db
+*.opendb
