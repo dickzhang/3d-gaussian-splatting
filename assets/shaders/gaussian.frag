@@ -6,7 +6,6 @@ in vec3 vInvCov2D;
 in float vHalfExtentPx;
 in vec2 vLocalPx;
 uniform int u_useAnisotropic;
-uniform int u_referenceLook;
 
 layout(location = 0) out vec4 outColor;
 
@@ -27,18 +26,13 @@ void main() {
             discard;
         }
 
-        float falloff = (u_referenceLook != 0) ? 3.2 : 4.0;
+        float falloff = 3.2;
         alpha = exp(-r2 * falloff) * vOpacity;
     }
 
     if (alpha < alphaThreshold) {
         discard;
     }
-
     vec3 color = max(vColor, vec3(0.0));
-    if (u_referenceLook == 0) {
-        color = clamp(color, vec3(0.0), vec3(1.0));
-    }
-
     outColor = vec4(color * alpha, alpha);
 }

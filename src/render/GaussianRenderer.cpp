@@ -131,29 +131,15 @@ namespace gs
 		m_drawUseAnisotropicLoc = glGetUniformLocation(m_drawProgram.id(), "u_useAnisotropic");
 		m_drawCameraPosLoc = glGetUniformLocation(m_drawProgram.id(), "u_cameraPos");
 		m_drawShDegreeLoc = glGetUniformLocation(m_drawProgram.id(), "u_shDegree");
-		m_drawReferenceLookLoc = glGetUniformLocation(m_drawProgram.id(), "u_referenceLook");
 
 		m_depthViewLoc = glGetUniformLocation(m_depthProgram.id(), "u_view");
 		m_depthRealCountLoc = glGetUniformLocation(m_depthProgram.id(), "u_realCount");
 		m_depthSortCountLoc = glGetUniformLocation(m_depthProgram.id(), "u_sortCount");
-		m_depthFrontToBackLoc = glGetUniformLocation(m_depthProgram.id(), "u_frontToBack");
 
 		m_sortCountLoc = glGetUniformLocation(m_sortProgram.id(), "u_count");
 		m_sortStageLoc = glGetUniformLocation(m_sortProgram.id(), "u_stage");
 		m_sortPassLoc = glGetUniformLocation(m_sortProgram.id(), "u_pass");
 		m_compositeTexLoc = glGetUniformLocation(m_compositeProgram.id(), "u_accumTex");
-
-		const bool uniformsOk = m_drawViewLoc >= 0 && m_drawProjLoc >= 0 && m_drawViewportSizeLoc >= 0 && m_drawMaxPointSizeLoc >= 0 &&
-			m_drawUseAnisotropicLoc >= 0 && m_drawCameraPosLoc >= 0 && m_drawShDegreeLoc >= 0 &&
-			m_drawReferenceLookLoc >= 0 &&
-			m_depthViewLoc >= 0 && m_depthRealCountLoc >= 0 && m_depthSortCountLoc >= 0 && m_depthFrontToBackLoc >= 0 &&
-			m_sortCountLoc >= 0 && m_sortStageLoc >= 0 && m_sortPassLoc >= 0 &&
-			m_compositeTexLoc >= 0;
-		if (!uniformsOk)
-		{
-			std::cerr << "Failed to resolve one or more shader uniform locations\n";
-			return false;
-		}
 
 		glGenBuffers(1, &m_splatBuffer);
 		glGenBuffers(1, &m_keysBuffer);
@@ -351,7 +337,7 @@ namespace gs
 
 		const int renderWidth = std::max(1, static_cast<int>(viewportWidth));
 		const int renderHeight = std::max(1, static_cast<int>(viewportHeight));
-		bool useReferencePath = m_referenceLook;
+		bool useReferencePath = true;
 		if (useReferencePath)
 		{
 			if (!ensureAccumulationTarget(renderWidth, renderHeight))
@@ -392,7 +378,6 @@ namespace gs
 		const glm::vec3 cameraPos(invView[3].x, invView[3].y, invView[3].z);
 		glUniform3f(m_drawCameraPosLoc, cameraPos.x, cameraPos.y, cameraPos.z);
 		glUniform1i(m_drawShDegreeLoc, m_shDegree);
-		glUniform1i(m_drawReferenceLookLoc, m_referenceLook ? 1 : 0);
 
 		glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 0, m_splatBuffer);
 		glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 1, m_indicesBuffer);
@@ -524,16 +509,6 @@ namespace gs
 		return m_maxSupportedShDegree;
 	}
 
-	void GaussianRenderer::setReferenceLook(bool enabled)
-	{
-		m_referenceLook = enabled;
-	}
-
-	bool GaussianRenderer::referenceLook() const noexcept
-	{
-		return m_referenceLook;
-	}
-
 	std::size_t GaussianRenderer::nextPow2(std::size_t value)
 	{
 		if (value <= 1)
@@ -566,7 +541,6 @@ namespace gs
 		glUniformMatrix4fv(m_depthViewLoc, 1, GL_FALSE, glm::value_ptr(view));
 		glUniform1ui(m_depthRealCountLoc, static_cast<GLuint>(m_splatCount));
 		glUniform1ui(m_depthSortCountLoc, static_cast<GLuint>(m_sortCount));
-		glUniform1ui(m_depthFrontToBackLoc, m_referenceLook ? 1u : 0u);
 
 		glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 0, m_splatBuffer);
 		glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 1, m_keysBuffer);

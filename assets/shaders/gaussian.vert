@@ -23,7 +23,6 @@ uniform float u_maxPointSize;
 uniform int u_useAnisotropic;
 uniform vec3 u_cameraPos;
 uniform int u_shDegree;
-uniform int u_referenceLook;
 
 out vec3 vColor;
 out float vOpacity;

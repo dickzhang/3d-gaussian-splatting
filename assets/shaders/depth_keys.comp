@@ -25,7 +25,6 @@ layout(std430, binding = 2) writeonly buffer IndexBuffer {
 uniform mat4 u_view;
 uniform uint u_realCount;
 uniform uint u_sortCount;
-uniform uint u_frontToBack;
 
 void main() {
     uint id = gl_GlobalInvocationID.x;
@@ -45,9 +44,6 @@ void main() {
     float depth = max(0.0, -viewPos.z);
     uint bits = floatBitsToUint(depth);
 
-    // Bitonic sort is ascending.
-    // front-to-back: smaller depth first.
-    // back-to-front: larger depth first via key inversion.
-    keys[id] = (u_frontToBack != 0u) ? bits : (~bits);
+    keys[id] =bits;
     indices[id] = id;
 }

@@ -115,7 +115,6 @@ int main()
 	}
 	renderer.setUseAnisotropic(true);
 	renderer.setShDegree(renderer.maxSupportedShDegree());
-	renderer.setReferenceLook(true);
 	std::cout << "Model SH max degree: " << renderer.maxSupportedShDegree() << "\n";
 	std::cout << "Default visual mode: anisotropic ON, SH degree " << renderer.shDegree() << "\n";
 	std::cout << "Look mode: reference-like (press R to toggle original/reference)\n";
@@ -132,17 +131,8 @@ int main()
 		int height = 1;
 		glfwGetFramebufferSize(window, &width, &height);
 		glViewport(0, 0, width, height);
-		const float clearAlpha = renderer.referenceLook() ? 1.0f : 1.0f;
-		if (renderer.referenceLook())
-		{
-			glClearColor(0.0f, 0.0f, 0.0f, clearAlpha);
-		}
-		else
-		{
-			glClearColor(0.04f, 0.05f, 0.07f, clearAlpha);
-		}
+		glClearColor(0.0f, 0.0f, 0.0f, 1.0f);
 		glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
-
 		const float aspect = (width > 0 && height > 0) ? static_cast<float>(width) / static_cast<float>(height) : 1.0f;
 		renderer.render(camera.viewMatrix(), camera.projectionMatrix(aspect), static_cast<float>(width), static_cast<float>(height));
 

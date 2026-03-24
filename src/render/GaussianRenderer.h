@@ -38,10 +38,6 @@ namespace gs
 		int shDegree() const noexcept;
 		// 获取模型支持的最大SH阶数
 		int maxSupportedShDegree() const noexcept;
-		// 设置参考观感路径开关
-		void setReferenceLook(bool enabled);
-		// 查询参考观感路径开关
-		bool referenceLook() const noexcept;
 
 	private:
 		// GPU侧点元布局（需与shader中的std430结构严格一致）
@@ -104,12 +100,10 @@ namespace gs
 		GLint m_drawUseAnisotropicLoc{ -1 }; // 主绘制u_useAnisotropic位置
 		GLint m_drawCameraPosLoc{ -1 };    // 主绘制u_cameraPos位置
 		GLint m_drawShDegreeLoc{ -1 };     // 主绘制u_shDegree位置
-		GLint m_drawReferenceLookLoc{ -1 };// 主绘制u_referenceLook位置
 
 		GLint m_depthViewLoc{ -1 };         // 深度程序u_view位置
 		GLint m_depthRealCountLoc{ -1 };    // 深度程序u_realCount位置
 		GLint m_depthSortCountLoc{ -1 };    // 深度程序u_sortCount位置
-		GLint m_depthFrontToBackLoc{ -1 };  // 深度程序u_frontToBack位置
 
 		GLint m_sortCountLoc{ -1 };  // 排序程序u_count位置
 		GLint m_sortStageLoc{ -1 };  // 排序程序u_stage位置
@@ -120,7 +114,6 @@ namespace gs
 		bool m_useAnisotropic{ true };  // 各向异性开关
 		int m_shDegree{ 1 };            // 当前SH阶数
 		int m_maxSupportedShDegree{ 0 };// 模型支持的最大SH阶数
-		bool m_referenceLook{ true };   // 参考观感渲染路径开关
 	};
 
 } // namespace gs
