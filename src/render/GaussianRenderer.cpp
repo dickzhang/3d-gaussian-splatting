@@ -318,8 +318,8 @@ namespace gs
 		glGetIntegerv(GL_DRAW_FRAMEBUFFER_BINDING, &prevDrawFbo);
 		glGetIntegerv(GL_READ_FRAMEBUFFER_BINDING, &prevReadFbo);
 
-		GLint prevViewport[4] = { 0, 0, 0, 0 };
-		glGetIntegerv(GL_VIEWPORT, prevViewport);
+		std::array<GLint, 4> prevViewport{ 0, 0, 0, 0 };
+		glGetIntegerv(GL_VIEWPORT, prevViewport.data());
 
 		GLint prevProgram = 0;
 		GLint prevVao = 0;
@@ -355,58 +355,11 @@ namespace gs
 			glClear(GL_COLOR_BUFFER_BIT);
 		}
 
-		glEnable(GL_BLEND);
-		if (useReferencePath)
-		{
-			// Unity plugin pass: Blend OneMinusDstAlpha One
-			glBlendFuncSeparate(GL_ONE_MINUS_DST_ALPHA, GL_ONE, GL_ONE, GL_ONE_MINUS_SRC_ALPHA);
-		}
-		else
-		{
-			glBlendFuncSeparate(GL_ONE, GL_ONE_MINUS_SRC_ALPHA, GL_ONE, GL_ONE_MINUS_SRC_ALPHA);
-		}
-		glDepthMask(GL_FALSE);
-		glDisable(GL_CULL_FACE);
-
-		m_drawProgram.use();
-		glUniformMatrix4fv(m_drawViewLoc, 1, GL_FALSE, glm::value_ptr(view));
-		glUniformMatrix4fv(m_drawProjLoc, 1, GL_FALSE, glm::value_ptr(projection));
-		glUniform2f(m_drawViewportSizeLoc, viewportWidth, viewportHeight);
-		glUniform1f(m_drawMaxPointSizeLoc, m_maxPointSize);
-		glUniform1i(m_drawUseAnisotropicLoc, m_useAnisotropic ? 1 : 0);
-		const glm::mat4 invView = glm::inverse(view);
-		const glm::vec3 cameraPos(invView[3].x, invView[3].y, invView[3].z);
-		glUniform3f(m_drawCameraPosLoc, cameraPos.x, cameraPos.y, cameraPos.z);
-		glUniform1i(m_drawShDegreeLoc, m_shDegree);
-
-		glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 0, m_splatBuffer);
-		glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 1, m_indicesBuffer);
-
-		glBindVertexArray(m_vao);
-		glDrawArraysInstanced(GL_TRIANGLES, 0, 6, static_cast<GLsizei>(m_splatCount));
+		drawGaussianPass(view, projection, viewportWidth, viewportHeight, useReferencePath);
 
 		if (useReferencePath)
 		{
-			glBindFramebuffer(GL_FRAMEBUFFER, static_cast<GLuint>(prevDrawFbo));
-			glViewport(prevViewport[0], prevViewport[1], prevViewport[2], prevViewport[3]);
-
-			m_compositeProgram.use();
-			glActiveTexture(GL_TEXTURE0);
-			glBindTexture(GL_TEXTURE_2D, m_accumColorTex);
-			glUniform1i(m_compositeTexLoc, 0);
-
-			const GLboolean wasDepthTest = glIsEnabled(GL_DEPTH_TEST);
-			glDisable(GL_DEPTH_TEST);
-
-			glBlendFuncSeparate(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA, GL_ONE, GL_ONE_MINUS_SRC_ALPHA);
-			glDrawArrays(GL_TRIANGLES, 0, 3);
-
-			if (wasDepthTest)
-			{
-				glEnable(GL_DEPTH_TEST);
-			}
-
-			glBindFramebuffer(GL_READ_FRAMEBUFFER, static_cast<GLuint>(prevReadFbo));
+			compositeAccumulationPass(prevDrawFbo, prevReadFbo, prevViewport);
 		}
 
 		glActiveTexture(GL_TEXTURE0);
@@ -438,6 +391,64 @@ namespace gs
 
 		glBindVertexArray(static_cast<GLuint>(prevVao));
 		glUseProgram(static_cast<GLuint>(prevProgram));
+	}
+
+	void GaussianRenderer::drawGaussianPass(const glm::mat4& view, const glm::mat4& projection, float viewportWidth, float viewportHeight, bool useReferencePath)
+	{
+		glEnable(GL_BLEND);
+		if (useReferencePath)
+		{
+			// Unity plugin pass: Blend OneMinusDstAlpha One
+			glBlendFuncSeparate(GL_ONE_MINUS_DST_ALPHA, GL_ONE, GL_ONE, GL_ONE_MINUS_SRC_ALPHA);
+		}
+		else
+		{
+			glBlendFuncSeparate(GL_ONE, GL_ONE_MINUS_SRC_ALPHA, GL_ONE, GL_ONE_MINUS_SRC_ALPHA);
+		}
+		glDepthMask(GL_FALSE);
+		glDisable(GL_CULL_FACE);
+
+		m_drawProgram.use();
+		glUniformMatrix4fv(m_drawViewLoc, 1, GL_FALSE, glm::value_ptr(view));
+		glUniformMatrix4fv(m_drawProjLoc, 1, GL_FALSE, glm::value_ptr(projection));
+		glUniform2f(m_drawViewportSizeLoc, viewportWidth, viewportHeight);
+		glUniform1f(m_drawMaxPointSizeLoc, m_maxPointSize);
+		glUniform1i(m_drawUseAnisotropicLoc, m_useAnisotropic ? 1 : 0);
+		const glm::mat4 invView = glm::inverse(view);
+		const glm::vec3 cameraPos(invView[3].x, invView[3].y, invView[3].z);
+		glUniform3f(m_drawCameraPosLoc, cameraPos.x, cameraPos.y, cameraPos.z);
+		glUniform1i(m_drawShDegreeLoc, m_shDegree);
+
+		glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 0, m_splatBuffer);
+		glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 1, m_indicesBuffer);
+
+		glBindVertexArray(m_vao);
+		glDrawArraysInstanced(GL_TRIANGLES, 0, 6, static_cast<GLsizei>(m_splatCount));
+	}
+
+	void GaussianRenderer::compositeAccumulationPass(GLint prevDrawFbo, GLint prevReadFbo, const std::array<GLint, 4>& prevViewport)
+	{
+		glBindFramebuffer(GL_FRAMEBUFFER, static_cast<GLuint>(prevDrawFbo));
+		glViewport(prevViewport[0], prevViewport[1], prevViewport[2], prevViewport[3]);
+		glBindVertexArray(m_vao);
+
+		m_compositeProgram.use();
+		glActiveTexture(GL_TEXTURE0);
+		glBindTexture(GL_TEXTURE_2D, m_accumColorTex);
+		glUniform1i(m_compositeTexLoc, 0);
+
+		const GLboolean wasDepthTest = glIsEnabled(GL_DEPTH_TEST);
+		glDisable(GL_DEPTH_TEST);
+
+		glBlendFuncSeparate(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA, GL_ONE, GL_ONE_MINUS_SRC_ALPHA);
+		glDrawArrays(GL_TRIANGLES, 0, 3);
+
+		if (wasDepthTest)
+		{
+			glEnable(GL_DEPTH_TEST);
+		}
+
+		glBindFramebuffer(GL_READ_FRAMEBUFFER, static_cast<GLuint>(prevReadFbo));
 	}
 
 	bool GaussianRenderer::ensureAccumulationTarget(int width, int height)
