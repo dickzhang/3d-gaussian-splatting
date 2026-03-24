@@ -199,7 +199,6 @@ void main() {
         vec2 p20 = unpackHalf2x16(splat.shPacked[20]);
         vec2 p21 = unpackHalf2x16(splat.shPacked[21]);
         vec2 p22 = unpackHalf2x16(splat.shPacked[22]);
-        vec2 p23 = unpackHalf2x16(splat.shPacked[23]);
 
         vec3 sh1_0 = vec3(p0.x, p0.y, p1.x);
         vec3 sh1_1 = vec3(p1.y, p2.x, p2.y);
@@ -216,7 +215,6 @@ void main() {
         vec3 sh3_4 = vec3(p18.x, p18.y, p19.x);
         vec3 sh3_5 = vec3(p19.y, p20.x, p20.y);
         vec3 sh3_6 = vec3(p21.x, p21.y, p22.x);
-        vec3 sh3_7 = vec3(p22.y, p23.x, p23.y);
 
         vec3 viewDir = worldPos - u_cameraPos;
         float dirLen = length(viewDir);
