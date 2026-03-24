@@ -4,3 +4,4 @@ build-local/
 *.user
 *.VC.db
 *.opendb
+enc_temp_folder/
