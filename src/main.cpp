@@ -8,6 +8,9 @@
 #include <glad/glad.h>
 #include <GLFW/glfw3.h>
 
+#include <glm/ext/matrix_transform.hpp>
+#include <glm/gtc/constants.hpp>
+
 #include "io/PlyLoader.h"
 #include "render/GaussianRenderer.h"
 #include "scene/Camera.h"
@@ -40,6 +43,15 @@ namespace
 		const bool enabled = value[0] != '\0' && value[0] != '0';
 		std::free(value);
 		return enabled;
+	}
+
+	glm::mat4 defaultReferenceModelTransform()
+	{
+		// Match the common Unity sample setup: rotate around X then mirror Z.
+		glm::mat4 model(1.0f);
+		model = glm::rotate(model, glm::radians(-160.0f), glm::vec3(1.0f, 0.0f, 0.0f));
+		model = glm::scale(model, glm::vec3(1.0f, 1.0f, -1.0f));
+		return model;
 	}
 
 } // namespace
@@ -115,9 +127,10 @@ int main()
 	}
 	renderer.setUseAnisotropic(true);
 	renderer.setShDegree(renderer.maxSupportedShDegree());
+	renderer.setModelTransform(defaultReferenceModelTransform());
 	std::cout << "Model SH max degree: " << renderer.maxSupportedShDegree() << "\n";
 	std::cout << "Default visual mode: anisotropic ON, SH degree " << renderer.shDegree() << "\n";
-	std::cout << "Look mode: reference-like (press R to toggle original/reference)\n";
+	std::cout << "Object transform: rotate X -160 deg, mirror Z\n";
 
 	gs::Camera camera;
 	float prevTime = static_cast<float>(glfwGetTime());

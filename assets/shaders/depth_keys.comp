@@ -23,6 +23,7 @@ layout(std430, binding = 2) writeonly buffer IndexBuffer {
 };
 
 uniform mat4 u_view;
+uniform mat4 u_model;
 uniform uint u_realCount;
 uniform uint u_sortCount;
 
@@ -39,7 +40,8 @@ void main() {
     }
 
     vec3 pos = splats[id].posOpacity.xyz;
-    vec4 viewPos = u_view * vec4(pos, 1.0);
+    vec4 worldPos = u_model * vec4(pos, 1.0);
+    vec4 viewPos = u_view * worldPos;
 
     float depth = max(0.0, -viewPos.z);
     uint bits = floatBitsToUint(depth);

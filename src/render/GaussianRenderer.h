@@ -39,6 +39,10 @@ namespace gs
 		int shDegree() const noexcept;
 		// ��ȡģ��֧�ֵ����SH����
 		int maxSupportedShDegree() const noexcept;
+		// ����ģ�͵������任����
+		void setModelTransform(const glm::mat4& model) noexcept;
+		// ��ȡ��ǰģ�ͱ任����
+		const glm::mat4& modelTransform() const noexcept;
 
 	private:
 		// GPU���Ԫ���֣�����shader�е�std430�ṹ�ϸ�һ�£�
@@ -99,6 +103,7 @@ namespace gs
 		std::size_t m_sortCount{ 0 };  // ����������2����
 
 		GLint m_drawViewLoc{ -1 };         // ������u_viewλ��
+		GLint m_drawModelLoc{ -1 };        // ������u_modelλ��
 		GLint m_drawProjLoc{ -1 };         // ������u_projλ��
 		GLint m_drawViewportSizeLoc{ -1 }; // ������u_viewportSizeλ��
 		GLint m_drawMaxPointSizeLoc{ -1 }; // ������u_maxPointSizeλ��
@@ -107,6 +112,7 @@ namespace gs
 		GLint m_drawShDegreeLoc{ -1 };     // ������u_shDegreeλ��
 
 		GLint m_depthViewLoc{ -1 };         // ��ȳ���u_viewλ��
+		GLint m_depthModelLoc{ -1 };        // ��ȳ���u_modelλ��
 		GLint m_depthRealCountLoc{ -1 };    // ��ȳ���u_realCountλ��
 		GLint m_depthSortCountLoc{ -1 };    // ��ȳ���u_sortCountλ��
 
@@ -119,6 +125,7 @@ namespace gs
 		bool m_useAnisotropic{ true };  // �������Կ���
 		int m_shDegree{ 1 };            // ��ǰSH����
 		int m_maxSupportedShDegree{ 0 };// ģ��֧�ֵ����SH����
+		glm::mat4 m_modelTransform{ 1.0f }; // ģ�͵������任
 	};
 
 } // namespace gs

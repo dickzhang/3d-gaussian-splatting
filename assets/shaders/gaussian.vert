@@ -17,6 +17,7 @@ layout(std430, binding = 1) readonly buffer SortedIndexBuffer {
 };
 
 uniform mat4 u_view;
+uniform mat4 u_model;
 uniform mat4 u_proj;
 uniform vec2 u_viewportSize;
 uniform float u_maxPointSize;
@@ -69,7 +70,9 @@ void main() {
     vec4 po = splat.posOpacity;
     vec4 cr = splat.colorRadius;
 
-    vec4 viewPos = u_view * vec4(po.xyz, 1.0);
+    vec4 worldPos4 = u_model * vec4(po.xyz, 1.0);
+    vec3 worldPos = worldPos4.xyz;
+    vec4 viewPos = u_view * worldPos4;
     vec4 clipPos = u_proj * viewPos;
 
     float depth = max(0.01, -viewPos.z);
@@ -98,7 +101,8 @@ void main() {
         0.0, scales.y * scales.y, 0.0,
         0.0, 0.0, scales.z * scales.z
     );
-    mat3 covWorld = rot * covLocal * transpose(rot);
+    mat3 objectToWorld = mat3(u_model);
+    mat3 covWorld = objectToWorld * (rot * covLocal * transpose(rot)) * transpose(objectToWorld);
     mat3 viewRot = mat3(u_view);
     mat3 covView = viewRot * covWorld * transpose(viewRot);
 
@@ -214,7 +218,7 @@ void main() {
         vec3 sh3_6 = vec3(p21.x, p21.y, p22.x);
         vec3 sh3_7 = vec3(p22.y, p23.x, p23.y);
 
-        vec3 viewDir = po.xyz - u_cameraPos;
+        vec3 viewDir = worldPos - u_cameraPos;
         float dirLen = length(viewDir);
         if (dirLen > 1e-6) {
             viewDir /= dirLen;

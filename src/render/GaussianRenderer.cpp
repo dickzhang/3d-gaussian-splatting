@@ -125,6 +125,7 @@ namespace gs
 		}
 
 		m_drawViewLoc = glGetUniformLocation(m_drawProgram.id(), "u_view");
+		m_drawModelLoc = glGetUniformLocation(m_drawProgram.id(), "u_model");
 		m_drawProjLoc = glGetUniformLocation(m_drawProgram.id(), "u_proj");
 		m_drawViewportSizeLoc = glGetUniformLocation(m_drawProgram.id(), "u_viewportSize");
 		m_drawMaxPointSizeLoc = glGetUniformLocation(m_drawProgram.id(), "u_maxPointSize");
@@ -133,6 +134,7 @@ namespace gs
 		m_drawShDegreeLoc = glGetUniformLocation(m_drawProgram.id(), "u_shDegree");
 
 		m_depthViewLoc = glGetUniformLocation(m_depthProgram.id(), "u_view");
+		m_depthModelLoc = glGetUniformLocation(m_depthProgram.id(), "u_model");
 		m_depthRealCountLoc = glGetUniformLocation(m_depthProgram.id(), "u_realCount");
 		m_depthSortCountLoc = glGetUniformLocation(m_depthProgram.id(), "u_sortCount");
 
@@ -140,6 +142,29 @@ namespace gs
 		m_sortStageLoc = glGetUniformLocation(m_sortProgram.id(), "u_stage");
 		m_sortPassLoc = glGetUniformLocation(m_sortProgram.id(), "u_pass");
 		m_compositeTexLoc = glGetUniformLocation(m_compositeProgram.id(), "u_accumTex");
+
+		const bool uniformsOk =
+			m_drawViewLoc >= 0 &&
+			m_drawModelLoc >= 0 &&
+			m_drawProjLoc >= 0 &&
+			m_drawViewportSizeLoc >= 0 &&
+			m_drawMaxPointSizeLoc >= 0 &&
+			m_drawUseAnisotropicLoc >= 0 &&
+			m_drawCameraPosLoc >= 0 &&
+			m_drawShDegreeLoc >= 0 &&
+			m_depthViewLoc >= 0 &&
+			m_depthModelLoc >= 0 &&
+			m_depthRealCountLoc >= 0 &&
+			m_depthSortCountLoc >= 0 &&
+			m_sortCountLoc >= 0 &&
+			m_sortStageLoc >= 0 &&
+			m_sortPassLoc >= 0 &&
+			m_compositeTexLoc >= 0;
+		if (!uniformsOk)
+		{
+			std::cerr << "Failed to resolve one or more shader uniform locations\n";
+			return false;
+		}
 
 		glGenBuffers(1, &m_splatBuffer);
 		glGenBuffers(1, &m_keysBuffer);
@@ -410,6 +435,7 @@ namespace gs
 
 		m_drawProgram.use();
 		glUniformMatrix4fv(m_drawViewLoc, 1, GL_FALSE, glm::value_ptr(view));
+		glUniformMatrix4fv(m_drawModelLoc, 1, GL_FALSE, glm::value_ptr(m_modelTransform));
 		glUniformMatrix4fv(m_drawProjLoc, 1, GL_FALSE, glm::value_ptr(projection));
 		glUniform2f(m_drawViewportSizeLoc, viewportWidth, viewportHeight);
 		glUniform1f(m_drawMaxPointSizeLoc, m_maxPointSize);
@@ -520,6 +546,22 @@ namespace gs
 		return m_maxSupportedShDegree;
 	}
 
+	void GaussianRenderer::setModelTransform(const glm::mat4& model) noexcept
+	{
+		const glm::mat3 linear(model);
+		const float det = glm::determinant(linear);
+		if (std::abs(det) < 1e-6f)
+		{
+			std::cerr << "Warning: model transform is near-singular; splat footprint may become unstable\n";
+		}
+		m_modelTransform = model;
+	}
+
+	const glm::mat4& GaussianRenderer::modelTransform() const noexcept
+	{
+		return m_modelTransform;
+	}
+
 	std::size_t GaussianRenderer::nextPow2(std::size_t value)
 	{
 		if (value <= 1)
@@ -550,6 +592,7 @@ namespace gs
 	{
 		m_depthProgram.use();
 		glUniformMatrix4fv(m_depthViewLoc, 1, GL_FALSE, glm::value_ptr(view));
+		glUniformMatrix4fv(m_depthModelLoc, 1, GL_FALSE, glm::value_ptr(m_modelTransform));
 		glUniform1ui(m_depthRealCountLoc, static_cast<GLuint>(m_splatCount));
 		glUniform1ui(m_depthSortCountLoc, static_cast<GLuint>(m_sortCount));
 
