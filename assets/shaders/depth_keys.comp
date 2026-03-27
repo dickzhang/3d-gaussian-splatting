@@ -2,6 +2,18 @@
 
 layout(local_size_x = 256, local_size_y = 1, local_size_z = 1) in;
 
+struct ChunkEntry {
+    vec4 sphere;
+    uvec4 rangeData;
+};
+
+struct ChunkScheduleEntry {
+    uint chunkIndex;
+    uint outputOffset;
+    uint splatCount;
+    uint reserved;
+};
+
 struct GPUSplat {
     vec4 posOpacity;
     vec4 scalePad;
@@ -14,18 +26,62 @@ layout(std430, binding = 0) readonly buffer SplatBuffer {
     GPUSplat splats[];
 };
 
+struct SplatPosition {
+    vec4 posOpacity;
+};
+
+layout(std430, binding = 3) readonly buffer PositionBuffer {
+    SplatPosition positions[];
+};
+
 layout(std430, binding = 1) writeonly buffer KeyBuffer {
     uint keys[];
 };
 
-layout(std430, binding = 2) writeonly buffer IndexBuffer {
+layout(std430, binding = 2) buffer IndexBuffer {
     uint indices[];
+};
+
+layout(std430, binding = 4) readonly buffer ChunkBuffer {
+    ChunkEntry chunks[];
+};
+
+layout(std430, binding = 5) readonly buffer ScheduleBuffer {
+    ChunkScheduleEntry scheduleEntries[];
 };
 
 uniform mat4 u_view;
 uniform mat4 u_model;
 uniform uint u_realCount;
 uniform uint u_sortCount;
+uniform uint u_chunkCount;
+uniform uint u_scheduleEntryCount;
+uniform int u_inputLayout;
+uniform int u_useSeedIndices;
+uniform int u_useScheduleDomain;
+
+int findScheduleIndex(uint compactedIndex) {
+    if (u_scheduleEntryCount == 0u) {
+        return -1;
+    }
+
+    uint left = 0u;
+    uint right = u_scheduleEntryCount;
+    while (left < right) {
+        uint mid = left + ((right - left) >> 1u);
+        uint startOffset = scheduleEntries[mid].outputOffset;
+        uint endOffset = startOffset + scheduleEntries[mid].splatCount;
+        if (compactedIndex < startOffset) {
+            right = mid;
+        } else if (compactedIndex >= endOffset) {
+            left = mid + 1u;
+        } else {
+            return int(mid);
+        }
+    }
+
+    return -1;
+}
 
 void main() {
     uint id = gl_GlobalInvocationID.x;
@@ -39,13 +95,41 @@ void main() {
         return;
     }
 
-    vec3 pos = splats[id].posOpacity.xyz;
+    uint sourceIndex = id;
+    if (u_useScheduleDomain != 0) {
+        int scheduleIndex = findScheduleIndex(id);
+        if (scheduleIndex < 0) {
+            keys[id] = 0xFFFFFFFFu;
+            indices[id] = 0xFFFFFFFFu;
+            return;
+        }
+
+        ChunkScheduleEntry schedule = scheduleEntries[scheduleIndex];
+        if (schedule.chunkIndex >= u_chunkCount) {
+            keys[id] = 0xFFFFFFFFu;
+            indices[id] = 0xFFFFFFFFu;
+            return;
+        }
+
+        uint localOffset = id - schedule.outputOffset;
+        sourceIndex = chunks[schedule.chunkIndex].rangeData.x + localOffset;
+    } else if (u_useSeedIndices != 0) {
+        // Legacy seeded path using the pre-expanded visible splat subset.
+        sourceIndex = indices[id];
+    }
+    if (sourceIndex == 0xFFFFFFFFu) {
+        keys[id] = 0xFFFFFFFFu;
+        indices[id] = 0xFFFFFFFFu;
+        return;
+    }
+
+    vec3 pos = (u_inputLayout == 0) ? splats[sourceIndex].posOpacity.xyz : positions[sourceIndex].posOpacity.xyz;
     vec4 worldPos = u_model * vec4(pos, 1.0);
     vec4 viewPos = u_view * worldPos;
 
     float depth = max(0.0, -viewPos.z);
     uint bits = floatBitsToUint(depth);
 
-    keys[id] =bits;
-    indices[id] = id;
+    keys[id] = bits;
+    indices[id] = sourceIndex;
 }

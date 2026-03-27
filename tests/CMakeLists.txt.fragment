@@ -1,0 +1,29 @@
+# Add this section to your main CMakeLists.txt to enable test building
+
+# Option to build tests (disabled by default to not slow down normal builds)
+option(BUILD_TESTS "Build unit tests" OFF)
+
+if(BUILD_TESTS)
+    message(STATUS "Building tests")
+    
+    # Test: Chunk Scheduler
+    add_executable(chunk_scheduler_test
+        tests/ChunkSchedulerTest.cpp
+    )
+    target_include_directories(chunk_scheduler_test PRIVATE 
+        src
+        tests
+    )
+    
+    # Test: Chunk Dispatch
+    add_executable(chunk_dispatch_test
+        tests/ChunkDispatchTest.cpp
+    )
+    target_include_directories(chunk_dispatch_test PRIVATE 
+        src
+        tests
+    )
+    
+    # More tests can be added here as they are created
+    
+endif()

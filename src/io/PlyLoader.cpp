@@ -1,5 +1,7 @@
 #include "io/PlyLoader.h"
 
+#include "core/PathUtils.h"
+
 #include <algorithm>
 #include <cmath>
 #include <cstdint>
@@ -176,7 +178,7 @@ namespace gs
 		std::ifstream ifs(path, std::ios::binary);
 		if (!ifs.is_open())
 		{
-			std::cerr << "Failed to open PLY: " << path.string() << '\n';
+			std::cerr << "Failed to open PLY: " << pathToUtf8(path) << '\n';
 			return false;
 		}
 

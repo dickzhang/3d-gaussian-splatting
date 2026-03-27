@@ -38,9 +38,24 @@ add_executable(gaussian_splatting_gl
   src/main.cpp
   
   src/core/ShaderProgram.cpp
+  src/cache/SplatCacheReader.cpp
+  src/runtime/RuntimeSplatAssetLoader.cpp
   src/scene/Camera.cpp
-  src/io/PlyLoader.cpp
+  src/render/GpuUploadBuffers.cpp
+  src/render/ChunkSchedulerPipeline.cpp
+  src/render/ScheduleCompactionPipeline.cpp
+  src/render/ViewDataPipeline.cpp
   src/render/GaussianRenderer.cpp
+)
+
+add_executable(gs_cache_builder
+  src/import/PlySceneImporter.cpp
+  src/io/PlyLoader.cpp
+  src/render/GpuSplatPacking.cpp
+  src/cache/SplatCacheWriter.cpp
+  src/cache/SplatCacheReader.cpp
+  src/runtime/RuntimeSplatAssetLoader.cpp
+  tools/gs_cache_builder/main.cpp
 )
 
 target_include_directories(gaussian_splatting_gl PRIVATE
@@ -63,6 +78,11 @@ target_link_libraries(gaussian_splatting_gl
     ole32
 )
 
+target_include_directories(gs_cache_builder PRIVATE
+  src
+  "${GLM_INCLUDE_DIR}"
+)
+
 if(EXISTS "${GLFW_LIB_DIR}/glfw3.dll")
   add_custom_command(TARGET gaussian_splatting_gl POST_BUILD
     COMMAND ${CMAKE_COMMAND} -E copy_if_different
@@ -76,3 +96,35 @@ add_custom_command(TARGET gaussian_splatting_gl POST_BUILD
   "${CMAKE_SOURCE_DIR}/assets"
   "$<TARGET_FILE_DIR:gaussian_splatting_gl>/assets"
 )
+
+# =============================================================================
+# Test Infrastructure (optional, for validation of upcoming changes)
+# =============================================================================
+option(BUILD_TESTS "Build unit tests for validation" OFF)
+
+if(BUILD_TESTS)
+  message(STATUS "Building tests")
+  
+  # Test: Chunk Scheduler (Change 1: Tunable thresholds)
+  add_executable(chunk_scheduler_test
+    tests/ChunkSchedulerTest.cpp
+  )
+  target_include_directories(chunk_scheduler_test PRIVATE 
+    src
+    tests
+    "${GLM_INCLUDE_DIR}"
+  )
+  
+  # Test: Chunk Dispatch (Change 3: Chunk-driven dispatch)
+  add_executable(chunk_dispatch_test
+    tests/ChunkDispatchTest.cpp
+  )
+  target_include_directories(chunk_dispatch_test PRIVATE 
+    src
+    tests
+    "${GLM_INCLUDE_DIR}"
+  )
+  
+  # More tests can be added here as needed
+  
+endif()

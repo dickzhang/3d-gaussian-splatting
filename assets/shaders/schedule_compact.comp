@@ -1,0 +1,55 @@
+#version 430 core
+
+layout(local_size_x = 256, local_size_y = 1, local_size_z = 1) in;
+
+struct ChunkEntry {
+    vec4 sphere;
+    uvec4 rangeData;
+};
+
+struct ChunkScheduleEntry {
+    uint chunkIndex;
+    uint outputOffset;
+    uint splatCount;
+    uint reserved;
+};
+
+layout(std430, binding = 0) readonly buffer ChunkBuffer {
+    ChunkEntry chunks[];
+};
+
+layout(std430, binding = 1) readonly buffer ScheduleBuffer {
+    ChunkScheduleEntry scheduleEntries[];
+};
+
+layout(std430, binding = 2) buffer IndexBuffer {
+    uint indices[];
+};
+
+uniform uint u_chunkCount;
+uniform uint u_scheduleEntryCount;
+uniform uint u_sortCapacity;
+
+void main() {
+    uint scheduleIndex = gl_GlobalInvocationID.x;
+    if (scheduleIndex >= u_scheduleEntryCount) {
+        return;
+    }
+
+    ChunkScheduleEntry schedule = scheduleEntries[scheduleIndex];
+    if (schedule.chunkIndex >= u_chunkCount) {
+        return;
+    }
+
+    uint startIndex = chunks[schedule.chunkIndex].rangeData.x;
+    uint outputOffset = schedule.outputOffset;
+    uint splatCount = schedule.splatCount;
+    if (outputOffset >= u_sortCapacity) {
+        return;
+    }
+
+    uint maxCount = min(splatCount, u_sortCapacity - outputOffset);
+    for (uint offset = 0u; offset < maxCount; ++offset) {
+        indices[outputOffset + offset] = startIndex + offset;
+    }
+}
