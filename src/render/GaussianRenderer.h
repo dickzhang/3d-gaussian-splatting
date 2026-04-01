@@ -48,41 +48,45 @@ namespace gs
 		int maxSupportedShDegree() const noexcept;
 		// 设置模型到世界的变换矩阵
 		void setModelTransform(const glm::mat4& model) noexcept;
-		// 获取当前模型变换矩阵
+		// 获取当前模型到世界的变换矩阵
 		const glm::mat4& modelTransform() const noexcept;
+
 	private:
-		// 确保颜色累积目标尺寸与资源有效
-		bool ensureAccumulationTarget(int width, int height);
-		// 基于 chunk 可见性准备当前帧的排序/绘制域
+		// 根据调度模式选择 CPU 或 GPU 路径，准备当前帧的活动 splat 域。
 		bool prepareVisibleSplatDomain(const glm::mat4& view, const glm::mat4& projection);
+		// 通过 CPU 计算当前帧的可见 chunk 调度结果。
 		bool prepareVisibleSplatDomainCpu(const glm::mat4& view, const glm::mat4& projection, bool previousSeededPath);
+		// 通过 GPU 计算当前帧的可见 chunk 调度结果。
 		bool prepareVisibleSplatDomainGpu(const glm::mat4& view, const glm::mat4& projection, bool previousSeededPath);
+		// 为按 outputOffset 查找的 schedule 建立排序索引。
 		bool prepareSortedScheduleLookup(std::size_t scheduleEntryCount);
+		// 将 chunk schedule 展开成实际 splat 索引序列。
 		bool runScheduleCompaction(std::size_t scheduleEntryCount);
+		// 对指定 key/index 缓冲执行 bitonic 排序。
 		bool runBitonicSort(GLuint keyBuffer, GLuint indexBuffer, std::size_t count);
+		// 更新间接绘制命令中的实例数量。
 		bool updateDrawIndirectCommand();
-		bool validateGpuCompactionResult(
-			const glm::mat4& view,
-			const glm::mat4& projection,
-			const ChunkSchedulerPipeline::DispatchStats& schedulerStats,
-			bool previousSeededPath);
+		// 将活动域重置回全量 splat 路径。
 		void resetActiveDomainToFull() noexcept;
+		// 根据可见比例决定当前帧是否继续使用 seeded path。
 		bool shouldUseSeededIndices(bool previousSeededPath, float visibleRatio) const noexcept;
+		// 从环境变量加载 chunk 调度相关配置。
 		void loadChunkSchedulingConfig();
-		// 执行深度键计算与 GPU 排序
-		void runDepthAndSort(const glm::mat4& view);
-		// 执行 view-dependent 数据预计算
+		// 执行 view-data 计算 pass。
 		bool runViewDataPass(
 			const glm::mat4& view,
 			const glm::mat4& projection,
 			float viewportWidth,
 			float viewportHeight,
-			bool activeDomainPreculled,
-			ViewDataPipeline::DispatchStats* outStats);
-		// 执行高斯累积绘制 pass
+			bool activeDomainPreculled);
+		// 执行深度键计算与 GPU 排序。
+		void runDepthAndSort(const glm::mat4& view);
+		// 执行高斯累积绘制 pass。
 		void drawGaussianPass(float viewportWidth, float viewportHeight, bool useReferencePath);
-		// 执行累积结果合成 pass
+		// 执行累积结果合成 pass。
 		void compositeAccumulationPass(GLint prevDrawFbo, GLint prevReadFbo, const std::array<GLint, 4>& prevViewport);
+		// 确保离屏累积目标与当前视口大小匹配。
+		bool ensureAccumulationTarget(int width, int height);
 
 		ShaderProgram m_drawProgram;      // 绘制程序
 		ShaderProgram m_depthProgram;     // 深度键计算程序
@@ -144,19 +148,11 @@ namespace gs
 
 		float m_maxPointSize{ 128.0f }; // 设备支持的最大点尺寸
 		bool m_useAnisotropic{ true };  // 各向异性开关
-		bool m_debugChunkStats{ false }; // 是否输出 chunk 调试统计
-		bool m_loggedAcceptanceFrame{ false }; // 首帧完整链路验收标记是否已输出
-		bool m_loggedCompositeFallback{ false }; // 是否已输出 composite fallback 警告
-		bool m_loggedChunkSchedulingConfig{ false }; // 是否已输出 chunk 调度配置
-		bool m_loggedDrawSubmission{ false }; // 是否已输出 draw submission 验证日志
+		bool m_loggedCompositeFallback{ false }; // 是否已输出 direct blend fallback 警告
 		bool m_hasChunkSchedulingSupport{ false }; // 当前资产是否支持 chunk 驱动调度
 		bool m_useSeededIndicesThisFrame{ false }; // 当前帧是否启用 seeded indices 缩减排序域
 		bool m_forceSeededPath{ false }; // 是否强制走 seeded/schedule downstream 调试路径
 		bool m_usedGpuSchedulerThisFrame{ false }; // 当前帧是否使用 GPU scheduler 生成 active domain
-		bool m_validateGpuCompaction{ false }; // 是否启用 GPU compaction CPU/GPU 对照验证
-		std::uint64_t m_renderFrameIndex{ 0 }; // 渲染帧序号
-		std::uint32_t m_chunkDebugLogCount{ 0 }; // 已输出的 chunk 调试日志次数
-		std::uint32_t m_gpuValidationLogCount{ 0 }; // 已输出 GPU compaction 验证日志次数
 		int m_shDegree{ 1 };            // 当前 SH 阶数
 		int m_maxSupportedShDegree{ 0 };// 模型支持的最大 SH 阶数
 		int m_inputLayout{ 1 };         // 1: split sections

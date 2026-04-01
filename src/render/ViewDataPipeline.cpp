@@ -87,15 +87,9 @@ namespace gs
 		int sh_degree,
 		std::size_t chunk_count,
 		std::size_t schedule_entry_count,
-		std::size_t splat_count,
-		DispatchStats* out_stats)
+		std::size_t splat_count)
 	{
-		if (out_stats != nullptr)
-		{
-			*out_stats = DispatchStats{};
-		}
-
-		if (handles.indices_buffer == 0 || handles.view_data_buffer == 0 || handles.view_stats_buffer == 0)
+		if (handles.indices_buffer == 0 || handles.view_data_buffer == 0)
 		{
 			std::cerr << "View-data dispatch requires initialized GPU buffers\n";
 			return false;
@@ -160,19 +154,10 @@ namespace gs
 		glUniform1ui(m_real_count_loc, static_cast<GLuint>(splat_count));
 		glUniform1i(m_input_layout_loc, input_layout);
 
-		const ViewDataDebugStats zero_stats{};
-		glBindBuffer(GL_SHADER_STORAGE_BUFFER, handles.view_stats_buffer);
-		glBufferSubData(
-			GL_SHADER_STORAGE_BUFFER,
-			0,
-			static_cast<GLsizeiptr>(sizeof(ViewDataDebugStats)),
-			&zero_stats);
-
 		glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 1, handles.indices_buffer);
 		glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 2, handles.view_data_buffer);
 		glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 9, handles.chunk_schedule_buffer);
 		glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 10, handles.chunk_schedule_sort_indices_buffer);
-		glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 8, handles.view_stats_buffer);
 		if (input_layout == 0)
 		{
 			glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 0, handles.splat_buffer);
@@ -195,20 +180,6 @@ namespace gs
 		const GLuint groups = static_cast<GLuint>((splat_count + (kComputeWorkGroupSize - 1)) / kComputeWorkGroupSize);
 		glDispatchCompute(groups, 1, 1);
 		glMemoryBarrier(GL_SHADER_STORAGE_BARRIER_BIT);
-
-		if (out_stats != nullptr)
-		{
-			ViewDataDebugStats raw_stats{};
-			glBindBuffer(GL_SHADER_STORAGE_BUFFER, handles.view_stats_buffer);
-			glGetBufferSubData(
-				GL_SHADER_STORAGE_BUFFER,
-				0,
-				static_cast<GLsizeiptr>(sizeof(ViewDataDebugStats)),
-				&raw_stats);
-			out_stats->processed_splats = raw_stats.processed_splats;
-			out_stats->chunk_tests = raw_stats.chunk_tests;
-			out_stats->chunk_culled_splats = raw_stats.chunk_culled_splats;
-		}
 
 		const GLenum dispatch_error = glGetError();
 		if (dispatch_error != GL_NO_ERROR)

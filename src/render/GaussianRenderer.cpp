@@ -26,14 +26,16 @@ namespace gs
 	namespace
 	{
 
+		// 各 compute shader 共享的线程组尺寸。
 		constexpr GLuint kComputeWorkGroupSize = 256u;
+		// 用于标记排序与调度缓冲中的无效 splat 索引。
 		constexpr std::uint32_t kInvalidSplatIndex = 0xFFFFFFFFu;
-		constexpr std::uint64_t kChunkDebugLogInterval = 120u;
-		constexpr std::uint32_t kMaxChunkDebugLogs = 10u;
-		constexpr std::uint32_t kMaxGpuValidationLogs = 10u;
+		// seeded path 退出阈值默认值。
 		constexpr float kDefaultChunkSchedulingDisableVisibleRatio = 0.90f;
+		// seeded path 进入阈值默认值。
 		constexpr float kDefaultChunkSchedulingEnableVisibleRatio = 0.80f;
 
+		// 计算不小于给定数量的最小 2 的幂，用作 bitonic sort 容量。
 		std::size_t nextPow2(std::size_t value)
 		{
 			if (value <= 1)
@@ -60,6 +62,7 @@ namespace gs
 			return padded;
 		}
 
+		// 根据元素数量计算 compute shader 需要的 dispatch 组数。
 		GLuint dispatchGroupCount(std::size_t elementCount)
 		{
 			if (elementCount == 0)
@@ -70,6 +73,7 @@ namespace gs
 			return static_cast<GLuint>((elementCount + (kComputeWorkGroupSize - 1)) / kComputeWorkGroupSize);
 		}
 
+		// 估算模型矩阵三条轴向中的最大缩放，用于放大 chunk 包围球半径。
 		float maxModelAxisScale(const glm::mat4& model)
 		{
 			const glm::vec3 c0(model[0].x, model[0].y, model[0].z);
@@ -78,6 +82,7 @@ namespace gs
 			return std::max(glm::length(c0), std::max(glm::length(c1), glm::length(c2)));
 		}
 
+		// 用 chunk 包围球做一次粗视锥裁剪，决定该 chunk 是否可能进入当前帧。
 		bool isChunkVisible(
 			const SplatCacheChunkEntry& chunk,
 			const glm::mat4& model,
@@ -109,6 +114,7 @@ namespace gs
 			return std::abs(viewCenter.x) <= limitX && std::abs(viewCenter.y) <= limitY;
 		}
 
+		// 校验 chunk 元数据是否连续覆盖整个 splat 索引域。
 		bool validateChunkRanges(
 			const std::vector<SplatCacheChunkEntry>& chunks,
 			std::size_t totalSplatCount)
@@ -160,6 +166,7 @@ namespace gs
 			return true;
 		}
 
+		// 读取环境变量文本值。
 		std::string readEnvironmentValue(const char* name)
 		{
 #ifdef _WIN32
@@ -178,6 +185,7 @@ namespace gs
 #endif
 		}
 
+		// 读取 0 到 1 区间的浮点环境变量，不合法时回退到默认值。
 		float readEnvironmentFloat(const char* name, float fallback)
 		{
 			const std::string rawValue = readEnvironmentValue(name);
@@ -196,12 +204,14 @@ namespace gs
 			return std::clamp(parsed, 0.0f, 1.0f);
 		}
 
+		// 读取布尔型环境变量，非空且首字符非 0 视为启用。
 		bool readEnvironmentFlag(const char* name)
 		{
 			const std::string value = readEnvironmentValue(name);
 			return !value.empty() && value[0] != '0';
 		}
 
+		// 输出运行时日志，并在配置了日志文件时同步落盘。
 		void emitRuntimeLog(std::ostream& stream, const std::string& message)
 		{
 			stream << message << '\n';
@@ -316,8 +326,6 @@ namespace gs
 		glGetFloatv(GL_ALIASED_POINT_SIZE_RANGE, pointRange);
 		m_maxPointSize = std::max(1.0f, pointRange[1]);
 		loadChunkSchedulingConfig();
-		const std::string debugChunkEnv = readEnvironmentValue("GS_DEBUG_CHUNKS");
-		m_debugChunkStats = !debugChunkEnv.empty() && debugChunkEnv[0] != '0';
 		m_initialized = true;
 		return true;
 	}
@@ -367,7 +375,6 @@ namespace gs
 		m_useSortedScheduleLookupThisFrame = false;
 		m_visibleScheduleScratch.clear();
 		m_visibleScheduleScratch.reserve(m_chunkCount);
-		m_loggedDrawSubmission = false;
 
 		emitRuntimeLog(std::cout, "Uploaded split-section asset: " + std::to_string(m_totalSplatCount) +
 			" splats to GPU (sort count: " + std::to_string(m_sortCount) +
@@ -387,8 +394,6 @@ namespace gs
 		{
 			return;
 		}
-
-		++m_renderFrameIndex;
 
 		const GLboolean wasBlendEnabled = glIsEnabled(GL_BLEND);
 		GLint prevBlendSrcRgb = GL_ONE;
@@ -464,22 +469,15 @@ namespace gs
 		{
 			runDepthAndSort(view);
 		}
-		bool viewDataExecuted = false;
-		ViewDataPipeline::DispatchStats viewDataStats{};
 		if (canDraw && !runViewDataPass(
 			view,
 			projection,
 			viewportWidth,
 			viewportHeight,
-			m_useSeededIndicesThisFrame,
-			&viewDataStats))
+			m_useSeededIndicesThisFrame))
 		{
 			std::cerr << "View-data compute pass failed, skipping draw for this frame\n";
 			canDraw = false;
-		}
-		else if (canDraw)
-		{
-			viewDataExecuted = true;
 		}
 
 		const int renderWidth = std::max(1, static_cast<int>(viewportWidth));
@@ -493,7 +491,7 @@ namespace gs
 				useReferencePath = false;
 				if (!m_loggedCompositeFallback)
 				{
-					emitRuntimeLog(std::cerr, "ACCEPT_WARN: composite reference path unavailable; frame used direct blend fallback");
+					emitRuntimeLog(std::cerr, "Composite accumulation target unavailable; frame used direct blend fallback");
 					m_loggedCompositeFallback = true;
 				}
 			}
@@ -507,93 +505,14 @@ namespace gs
 			glClear(GL_COLOR_BUFFER_BIT);
 		}
 
-		bool drawExecuted = false;
 		if (canDraw)
 		{
 			drawGaussianPass(viewportWidth, viewportHeight, useReferencePath);
-			drawExecuted = true;
-			if (!m_loggedDrawSubmission)
-			{
-				m_loggedDrawSubmission = true;
-				emitRuntimeLog(
-					std::cout,
-					"DRAW_SUBMISSION: mode=indirect draw_calls=1 submitted_instances=" + std::to_string(m_activeSplatCount) +
-					" active_splats=" + std::to_string(m_activeSplatCount) +
-					" compacted_splats=" + std::to_string(m_compactedSplatCount) +
-					" scheduled_ranges=" + std::to_string(m_visibleScheduleEntryCount) +
-					" schedule_lookup=" + std::string(
-						m_useSeededIndicesThisFrame
-							? (m_useSortedScheduleLookupThisFrame ? "indirect" :
-								(m_scheduleEntriesSortedThisFrame ? "direct" : "fallback"))
-							: "full") +
-					" draw_domain=" + std::string(m_drawUseIndirectLookupThisFrame ? "compacted" : "flat") +
-					" path=" + std::string(m_useSeededIndicesThisFrame ? "seeded" : "full"));
-			}
 		}
 
-		bool compositeExecuted = false;
 		if (canDraw && useReferencePath)
 		{
 			compositeAccumulationPass(prevDrawFbo, prevReadFbo, prevViewport);
-			compositeExecuted = true;
-		}
-
-		if (!m_loggedAcceptanceFrame && depthAndSortExecuted && viewDataExecuted && drawExecuted && compositeExecuted)
-		{
-			emitRuntimeLog(std::cout, "ACCEPT: pipeline frame completed (depth_sort=1 view_data=1 draw=1 composite=1 reference_path=1)");
-			m_loggedAcceptanceFrame = true;
-		}
-
-		if (m_debugChunkStats && viewDataExecuted && viewDataStats.chunk_culled_splats > viewDataStats.chunk_tests)
-		{
-			emitRuntimeLog(
-				std::cerr,
-				"CHUNK_DEBUG_WARN: invalid stats detected (chunk_culled_splats > chunk_tests)");
-		}
-
-		if (m_debugChunkStats &&
-			viewDataExecuted &&
-			m_chunkDebugLogCount < kMaxChunkDebugLogs &&
-			(m_renderFrameIndex == 1u || (m_renderFrameIndex % kChunkDebugLogInterval) == 0u))
-		{
-			if (!m_loggedChunkSchedulingConfig)
-			{
-				m_loggedChunkSchedulingConfig = true;
-				emitRuntimeLog(
-					std::cout,
-					"CHUNK_DEBUG_CONFIG: scheduler_mode=" +
-					std::string(
-						m_chunkSchedulerMode == ChunkSchedulerMode::Cpu ? "cpu" :
-						m_chunkSchedulerMode == ChunkSchedulerMode::Gpu ? "gpu" :
-						m_chunkSchedulerMode == ChunkSchedulerMode::Full ? "full" : "auto") +
-					" force_seeded=" + std::string(m_forceSeededPath ? "1" : "0") +
-					" enable_ratio=" + std::to_string(m_chunkSchedulingEnableVisibleRatio) +
-					" disable_ratio=" + std::to_string(m_chunkSchedulingDisableVisibleRatio));
-			}
-
-			++m_chunkDebugLogCount;
-			emitRuntimeLog(
-				std::cout,
-				"CHUNK_DEBUG: frame=" + std::to_string(m_renderFrameIndex) +
-				" chunks=" + std::to_string(m_chunkCount) +
-				" visible_chunks=" + std::to_string(m_visibleChunkCount) +
-				" scheduled_ranges=" + std::to_string(m_visibleScheduleEntryCount) +
-				" compacted_splats=" + std::to_string(m_compactedSplatCount) +
-				" producer=" + std::string(m_usedGpuSchedulerThisFrame ? "gpu" : "cpu") +
-				" path=" + std::string(m_useSeededIndicesThisFrame ? "seeded" : "full") +
-					" schedule_lookup=" + std::string(
-						m_useSeededIndicesThisFrame
-							? (m_useSortedScheduleLookupThisFrame ? "indirect" :
-								(m_scheduleEntriesSortedThisFrame ? "direct" : "fallback"))
-							: "full") +
-					" draw_domain=" + std::string(m_drawUseIndirectLookupThisFrame ? "compacted" : "flat") +
-					" force_seeded=" + std::string(m_forceSeededPath ? "1" : "0") +
-					" visible_ratio=" + std::to_string(m_lastVisibleRatio) +
-				" active_splats=" + std::to_string(m_activeSplatCount) +
-				" active_sort_count=" + std::to_string(m_sortCount) +
-				" processed_splats=" + std::to_string(viewDataStats.processed_splats) +
-				" chunk_tests=" + std::to_string(viewDataStats.chunk_tests) +
-				" chunk_culled_splats=" + std::to_string(viewDataStats.chunk_culled_splats));
 		}
 
 		glActiveTexture(GL_TEXTURE0);
@@ -853,7 +772,6 @@ namespace gs
 		}
 
 		m_forceSeededPath = readEnvironmentFlag("GS_CHUNK_FORCE_SEEDED_PATH");
-		m_validateGpuCompaction = readEnvironmentFlag("GS_VALIDATE_GPU_COMPACTION");
 	}
 
 	void GaussianRenderer::resetActiveDomainToFull() noexcept
@@ -1192,159 +1110,6 @@ namespace gs
 			return false;
 		}
 
-		if (m_validateGpuCompaction && !validateGpuCompactionResult(view, projection, schedulerStats, previousSeededPath))
-		{
-			return false;
-		}
-
-		return true;
-	}
-
-	bool GaussianRenderer::validateGpuCompactionResult(
-		const glm::mat4& view,
-		const glm::mat4& projection,
-		const ChunkSchedulerPipeline::DispatchStats& schedulerStats,
-		bool previousSeededPath)
-	{
-		std::vector<std::uint32_t> expectedIndices;
-		expectedIndices.reserve(m_sortCapacity);
-
-		std::size_t expectedVisibleChunkCount = 0;
-		std::size_t expectedScheduleEntryCount = 0;
-		for (const SplatCacheChunkEntry& chunk : m_chunks)
-		{
-			if (!isChunkVisible(chunk, m_modelTransform, view, projection))
-			{
-				continue;
-			}
-
-			const std::size_t startIndex = chunk.start_index;
-			const std::size_t endIndex = std::min(m_totalSplatCount, startIndex + static_cast<std::size_t>(chunk.splat_count));
-			const std::size_t visibleChunkSplatCount = endIndex - startIndex;
-			if (expectedIndices.size() > m_sortCapacity ||
-				visibleChunkSplatCount > (m_sortCapacity - expectedIndices.size()))
-			{
-				if (m_gpuValidationLogCount < kMaxGpuValidationLogs)
-				{
-					++m_gpuValidationLogCount;
-					emitRuntimeLog(std::cerr, "GPU_COMPACTION_VALIDATE: CPU reference exceeded sort capacity");
-				}
-				return false;
-			}
-
-			++expectedVisibleChunkCount;
-			++expectedScheduleEntryCount;
-			for (std::size_t splatIndex = startIndex; splatIndex < endIndex; ++splatIndex)
-			{
-				expectedIndices.push_back(static_cast<std::uint32_t>(splatIndex));
-			}
-		}
-
-		const std::size_t expectedCompactedCount = expectedIndices.size();
-		if (expectedCompactedCount > 0)
-		{
-			std::sort(expectedIndices.begin(), expectedIndices.end());
-		}
-		const float expectedVisibleRatio =
-			m_totalSplatCount == 0 ? 0.0f : static_cast<float>(static_cast<double>(expectedCompactedCount) / static_cast<double>(m_totalSplatCount));
-
-		std::size_t expectedActiveSplatCount = expectedCompactedCount;
-		std::size_t expectedSortCount = 0;
-		bool expectedUseSeededIndices = true;
-		if (expectedCompactedCount == 0)
-		{
-			expectedSortCount = 0;
-		}
-		else if (!shouldUseSeededIndices(previousSeededPath, expectedVisibleRatio))
-		{
-			expectedActiveSplatCount = m_totalSplatCount;
-			expectedSortCount = m_sortCapacity;
-			expectedUseSeededIndices = false;
-		}
-		else
-		{
-			expectedSortCount = nextPow2(expectedActiveSplatCount);
-			if (expectedSortCount > m_sortCapacity)
-			{
-				expectedActiveSplatCount = m_totalSplatCount;
-				expectedSortCount = m_sortCapacity;
-				expectedUseSeededIndices = false;
-			}
-		}
-
-		const bool shouldCompareIndices = expectedUseSeededIndices;
-		std::vector<std::uint32_t> gpuIndices;
-		if (shouldCompareIndices && expectedCompactedCount > 0)
-		{
-			gpuIndices.resize(expectedCompactedCount, 0u);
-			glBindBuffer(GL_SHADER_STORAGE_BUFFER, m_uploadBuffers.indices_buffer);
-			glGetBufferSubData(
-				GL_SHADER_STORAGE_BUFFER,
-				0,
-				static_cast<GLsizeiptr>(expectedCompactedCount * sizeof(std::uint32_t)),
-				gpuIndices.data());
-			glBindBuffer(GL_SHADER_STORAGE_BUFFER, 0);
-
-			const GLenum readbackErr = glGetError();
-			if (readbackErr != GL_NO_ERROR)
-			{
-				if (m_gpuValidationLogCount < kMaxGpuValidationLogs)
-				{
-					++m_gpuValidationLogCount;
-					emitRuntimeLog(
-						std::cerr,
-						"GPU_COMPACTION_VALIDATE: failed to read GPU indices, gl_error=" + std::to_string(readbackErr));
-				}
-				return false;
-			}
-
-			std::sort(gpuIndices.begin(), gpuIndices.end());
-		}
-
-		const bool countsMatch =
-			expectedVisibleChunkCount == schedulerStats.visible_chunk_count &&
-			expectedScheduleEntryCount == schedulerStats.schedule_entry_count &&
-			expectedCompactedCount == schedulerStats.active_splat_count &&
-			expectedActiveSplatCount == m_activeSplatCount &&
-			expectedSortCount == m_sortCount &&
-			expectedUseSeededIndices == m_useSeededIndicesThisFrame;
-		const bool indicesMatch = !shouldCompareIndices || gpuIndices == expectedIndices;
-
-		if (!countsMatch || !indicesMatch)
-		{
-			if (m_gpuValidationLogCount < kMaxGpuValidationLogs)
-			{
-				++m_gpuValidationLogCount;
-				emitRuntimeLog(
-					std::cerr,
-					"GPU_COMPACTION_VALIDATE_MISMATCH: visible_chunks gpu=" + std::to_string(schedulerStats.visible_chunk_count) +
-					" cpu=" + std::to_string(expectedVisibleChunkCount) +
-					" schedule_entries gpu=" + std::to_string(schedulerStats.schedule_entry_count) +
-					" cpu=" + std::to_string(expectedScheduleEntryCount) +
-					" compacted gpu=" + std::to_string(schedulerStats.active_splat_count) +
-					" cpu=" + std::to_string(expectedCompactedCount) +
-					" active gpu=" + std::to_string(m_activeSplatCount) +
-					" cpu=" + std::to_string(expectedActiveSplatCount) +
-					" sort gpu=" + std::to_string(m_sortCount) +
-					" cpu=" + std::to_string(expectedSortCount) +
-					" seeded gpu=" + std::string(m_useSeededIndicesThisFrame ? "1" : "0") +
-					" cpu=" + std::string(expectedUseSeededIndices ? "1" : "0") +
-					" indices_checked=" + std::string(shouldCompareIndices ? "1" : "0") +
-					" indices_match=" + std::string(indicesMatch ? "1" : "0"));
-			}
-			return false;
-		}
-
-		if (m_gpuValidationLogCount < kMaxGpuValidationLogs)
-		{
-			++m_gpuValidationLogCount;
-			emitRuntimeLog(
-				std::cout,
-				"GPU_COMPACTION_VALIDATE_OK: visible_chunks=" + std::to_string(expectedVisibleChunkCount) +
-				" compacted_splats=" + std::to_string(expectedCompactedCount) +
-				" sort_count=" + std::to_string(expectedSortCount));
-		}
-
 		return true;
 	}
 
@@ -1353,8 +1118,7 @@ namespace gs
 		const glm::mat4& projection,
 		float viewportWidth,
 		float viewportHeight,
-		bool activeDomainPreculled,
-		ViewDataPipeline::DispatchStats* outStats)
+		bool activeDomainPreculled)
 	{
 		const glm::mat4 invView = glm::inverse(view);
 		const glm::vec3 cameraPos(invView[3].x, invView[3].y, invView[3].z);
@@ -1377,8 +1141,7 @@ namespace gs
 			m_shDegree,
 			m_chunkCount,
 			m_visibleScheduleEntryCount,
-			m_activeSplatCount,
-			outStats);
+			m_activeSplatCount);
 	}
 
 	void GaussianRenderer::runDepthAndSort(const glm::mat4& view)

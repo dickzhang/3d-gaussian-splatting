@@ -21,6 +21,7 @@
 namespace
 {
 
+	// 去除字符串首尾空白，并剥离 UTF-8 BOM。
 	std::string trim_copy(std::string value)
 	{
 		const auto is_space = [](unsigned char c)
@@ -51,6 +52,7 @@ namespace
 		return value;
 	}
 
+	// 从配置文件中读取首个有效模型路径。
 	std::string readModelPathFromConfig(const std::filesystem::path& config_path)
 	{
 		std::ifstream ifs(config_path);
@@ -72,6 +74,7 @@ namespace
 		return {};
 	}
 
+	// 将配置中的相对路径解析为相对于配置文件目录的绝对路径。
 	std::filesystem::path resolveConfiguredPath(const std::filesystem::path& config_path, const std::string& configured_value)
 	{
 		std::filesystem::path path = gs::pathFromText(configured_value);
@@ -82,6 +85,7 @@ namespace
 		return path.lexically_normal();
 	}
 
+	// 读取环境变量文本值，Windows 下使用 _dupenv_s 避免悬空指针。
 	std::string readEnvValue(const char* name)
 	{
 #ifdef _WIN32
@@ -100,12 +104,7 @@ namespace
 #endif
 	}
 
-	bool readEnvFlag(const char* name)
-	{
-		const std::string value = readEnvValue(name);
-		return !value.empty() && value[0] != '0';
-	}
-
+	// 构造默认参考模型变换，使加载结果与常见示例朝向一致。
 	glm::mat4 defaultReferenceModelTransform()
 	{
 		// Match the common Unity sample setup: rotate around X then mirror Z.
@@ -115,6 +114,7 @@ namespace
 		return model;
 	}
 
+	// 输出运行时日志，并在配置了日志文件时同步追加到磁盘。
 	void emitRuntimeLog(std::ostream& stream, const std::string& message)
 	{
 		stream << message << '\n';
@@ -135,6 +135,7 @@ namespace
 
 } // namespace
 
+	// 应用入口：初始化 OpenGL，上载 cache 资产，并进入交互式渲染循环。
 int main()
 {
 	try

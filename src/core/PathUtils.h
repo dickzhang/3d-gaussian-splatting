@@ -16,6 +16,7 @@
 namespace gs
 {
 
+	// 将文本路径转换为 std::filesystem::path，并在 Windows 上兼容 UTF-8/本地代码页。
 	inline std::filesystem::path pathFromText(const std::string& value)
 	{
 #ifdef _WIN32
@@ -63,6 +64,7 @@ namespace gs
 #endif
 	}
 
+	// 将 filesystem 路径转换为 UTF-8 文本，便于日志和配置文件输出。
 	inline std::string pathToUtf8(const std::filesystem::path& value)
 	{
 #ifdef _WIN32

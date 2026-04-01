@@ -65,7 +65,6 @@ namespace gs
 		glGenBuffers(1, &out_handles.chunk_schedule_sort_keys_buffer);
 		glGenBuffers(1, &out_handles.chunk_schedule_sort_indices_buffer);
 		glGenBuffers(1, &out_handles.chunk_scheduler_stats_buffer);
-		glGenBuffers(1, &out_handles.view_stats_buffer);
 		glGenBuffers(1, &out_handles.keys_buffer);
 		glGenBuffers(1, &out_handles.indices_buffer);
 		glGenBuffers(1, &out_handles.view_data_buffer);
@@ -81,7 +80,6 @@ namespace gs
 			out_handles.chunk_schedule_sort_keys_buffer == 0 ||
 			out_handles.chunk_schedule_sort_indices_buffer == 0 ||
 			out_handles.chunk_scheduler_stats_buffer == 0 ||
-			out_handles.view_stats_buffer == 0 ||
 			out_handles.keys_buffer == 0 ||
 			out_handles.indices_buffer == 0 ||
 			out_handles.view_data_buffer == 0 ||
@@ -146,11 +144,6 @@ namespace gs
 			glDeleteBuffers(1, &handles.chunk_scheduler_stats_buffer);
 			handles.chunk_scheduler_stats_buffer = 0;
 		}
-		if (handles.view_stats_buffer != 0)
-		{
-			glDeleteBuffers(1, &handles.view_stats_buffer);
-			handles.view_stats_buffer = 0;
-		}
 		if (handles.keys_buffer != 0)
 		{
 			glDeleteBuffers(1, &handles.keys_buffer);
@@ -194,7 +187,6 @@ namespace gs
 			handles.chunk_schedule_sort_keys_buffer == 0 ||
 			handles.chunk_schedule_sort_indices_buffer == 0 ||
 			handles.chunk_scheduler_stats_buffer == 0 ||
-			handles.view_stats_buffer == 0 ||
 			handles.keys_buffer == 0 ||
 			handles.indices_buffer == 0 ||
 			handles.view_data_buffer == 0 ||
@@ -360,14 +352,6 @@ namespace gs
 			GL_SHADER_STORAGE_BUFFER,
 			static_cast<GLsizeiptr>(sizeof(ChunkSchedulerStats)),
 			&emptySchedulerStats,
-			GL_DYNAMIC_DRAW);
-
-		const ViewDataDebugStats empty_stats{};
-		glBindBuffer(GL_SHADER_STORAGE_BUFFER, handles.view_stats_buffer);
-		glBufferData(
-			GL_SHADER_STORAGE_BUFFER,
-			static_cast<GLsizeiptr>(sizeof(ViewDataDebugStats)),
-			&empty_stats,
 			GL_DYNAMIC_DRAW);
 
 		glBindBuffer(GL_SHADER_STORAGE_BUFFER, 0);

@@ -42,14 +42,14 @@ namespace gs
 	private:
 		// 根据 yaw/pitch 计算前向单位向量
 		glm::vec3 computeForward() const;
-		glm::vec3 m_position; // 相机位置
-		float m_yaw;          // 偏航角
-		float m_pitch;        // 俯仰角
+		glm::vec3 m_position; // 相机当前位置
+		float m_yaw;          // 当前偏航角
+		float m_pitch;        // 当前俯仰角
 		float m_fovDeg;       // 垂直视场角（度）
-		bool m_firstMouse;    // 右键旋转时是否为首帧
-		bool m_mouseCaptured; // 右键旋转期间是否已捕获鼠标
-		double m_lastMouseX;  // 上一帧鼠标 X
-		double m_lastMouseY;  // 上一帧鼠标 Y
+		bool m_firstMouse;    // 当前旋转交互是否处于首帧
+		bool m_mouseCaptured; // 当前是否处于鼠标捕获状态
+		double m_lastMouseX;  // 上一次记录的鼠标 X 坐标
+		double m_lastMouseY;  // 上一次记录的鼠标 Y 坐标
 	};
 
 } // namespace gs

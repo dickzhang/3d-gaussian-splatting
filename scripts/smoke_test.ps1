@@ -24,32 +24,28 @@ $testCases = @(
     @{
         Name = "Baseline"
         Env = @{
-            "GS_CHUNK_THRESHOLD" = "256"
-            "GS_DEBUG_CHUNKS" = "0"
             "GS_RUNTIME_LOG_FILE" = "smoke_baseline.log"
         }
     },
     @{
-        Name = "Debug Logging Enabled"
+        Name = "CPU Scheduler"
         Env = @{
-            "GS_CHUNK_THRESHOLD" = "256"
-            "GS_DEBUG_CHUNKS" = "1"
+            "GS_CHUNK_SCHEDULER_MODE" = "cpu"
             "GS_RUNTIME_LOG_FILE" = "smoke_debug.log"
         }
     },
     @{
-        Name = "Low Threshold"
+        Name = "GPU Scheduler"
         Env = @{
-            "GS_CHUNK_THRESHOLD" = "64"
-            "GS_DEBUG_CHUNKS" = "1"
+            "GS_CHUNK_SCHEDULER_MODE" = "gpu"
             "GS_RUNTIME_LOG_FILE" = "smoke_low_thresh.log"
         }
     },
     @{
-        Name = "High Threshold"
+        Name = "Forced Seeded Path"
         Env = @{
-            "GS_CHUNK_THRESHOLD" = "1024"
-            "GS_DEBUG_CHUNKS" = "1"
+            "GS_CHUNK_SCHEDULER_MODE" = "gpu"
+            "GS_CHUNK_FORCE_SEEDED_PATH" = "1"
             "GS_RUNTIME_LOG_FILE" = "smoke_high_thresh.log"
         }
     }

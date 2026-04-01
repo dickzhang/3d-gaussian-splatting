@@ -6,10 +6,12 @@
 namespace gs
 {
 
+	// 打包后 SH 系数字数，和 GPU/缓存格式保持一致。
 	inline constexpr int kPackedShWordCount = 24;
+	// 当前运行时支持的最大 SH 阶数。
 	inline constexpr int kMaxShDegree = 3;
 
-	// Shared GPU-side splat layout. This is the canonical runtime payload format.
+	// GPU 侧标准 splat 布局，也是运行时上传的基础载荷格式。
 	struct GPUSplat
 	{
 		float px;
@@ -37,8 +39,7 @@ namespace gs
 
 	static_assert(sizeof(GPUSplat) == 160, "GPUSplat must match std430 array stride");
 
-	// Per-instance view data produced by view_data.comp and consumed by gaussian.vert.
-	// Keep field order and scalar widths aligned with GLSL GPUViewSplat (std430).
+	// view_data.comp 生成、gaussian.vert 消费的视图空间中间数据布局。
 	struct GPUViewSplat
 	{
 		float clip_x;

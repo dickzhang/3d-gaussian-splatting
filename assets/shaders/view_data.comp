@@ -78,13 +78,6 @@ layout(std430, binding = 2) writeonly buffer ViewDataBuffer {
     GPUViewSplat viewSplats[];
 };
 
-layout(std430, binding = 8) buffer ViewStatsBuffer {
-    uint gProcessedSplats;
-    uint gChunkTests;
-    uint gChunkCulledSplats;
-    uint gReserved;
-};
-
 layout(std430, binding = 9) readonly buffer ScheduleBuffer {
     ChunkScheduleEntry scheduleEntries[];
 };
@@ -285,17 +278,11 @@ void main() {
         }
     }
 
-    atomicAdd(gProcessedSplats, 1u);
-
     if (u_activeDomainPreculled == 0) {
         if (chunkIndex < 0) {
             chunkIndex = findChunkIndex(i);
         }
-        if (chunkIndex >= 0) {
-            atomicAdd(gChunkTests, 1u);
-        }
         if (chunkIndex >= 0 && !isChunkVisible(chunks[chunkIndex])) {
-            atomicAdd(gChunkCulledSplats, 1u);
             writeInvalid(outputIndex);
             return;
         }

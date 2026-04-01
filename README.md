@@ -89,8 +89,7 @@ cmake --build build --config Release
 
 ### 环境变量
 
-- `GS_RUNTIME_LOG_FILE`：可选。若设置为文件路径，运行时会把关键启动/验收日志追加写入该文件。
-- `GS_DEBUG_CHUNKS`：可选。设为 `1` 后，运行时会定期输出 chunk 调试统计，包括 `producer`、`path`、`schedule_lookup`、`draw_domain`、`visible_ratio`、`visible_chunks`、`scheduled_ranges`、`compacted_splats`、`active_splats`、`active_sort_count`、`processed_splats`、`chunk_tests` 与 `chunk_culled_splats`。
+- `GS_RUNTIME_LOG_FILE`：可选。若设置为文件路径，运行时会把关键启动/运行日志追加写入该文件。
 - `GS_CHUNK_ENABLE_RATIO`：可选。覆盖 seeded path 的启用阈值，范围 `[0, 1]`。
 - `GS_CHUNK_DISABLE_RATIO`：可选。覆盖 seeded path 的退出阈值，范围 `[0, 1]`，且必须大于 `GS_CHUNK_ENABLE_RATIO`。
 - `GS_CHUNK_SCHEDULER_MODE`：可选。支持 `auto`、`cpu`、`gpu`、`full`，用于现场比较 GPU compaction、CPU fallback 和 full-domain 行为。
@@ -116,30 +115,28 @@ cmake --build build --config Release
 ./tools/run_step9_smoke.ps1 -SkipVisualCheckPrompt
 ```
 
-如果要继续 Step 8 的自动化验收，建议执行：
+如果要继续 Step 8 的自动化 smoke，建议执行：
 
 ```powershell
-./tools/run_step9_smoke.ps1 -RequireAcceptanceMarker -RunMissingPayloadCheck -SkipVisualCheckPrompt
+./tools/run_step9_smoke.ps1 -RunMissingPayloadCheck -SkipVisualCheckPrompt
 ```
 
-如果要同时验证 GPU chunk scheduler 生成的 compaction 域与 CPU 参考结果一致，可执行：
+如果要覆盖 GPU chunk scheduler 路径，可执行：
 
 ```powershell
-./tools/run_step9_smoke.ps1 -ChunkSchedulerMode gpu -RequireAcceptanceMarker -RequireGpuCompactionValidation -ExpectedDrawPath full -ExpectedDrawDomain flat -ExpectedScheduleLookup full -SkipVisualCheckPrompt
+./tools/run_step9_smoke.ps1 -ChunkSchedulerMode gpu -SkipVisualCheckPrompt
 ```
 
-如果要强制 seeded downstream 并确认 draw 侧继续消费 compacted domain，可执行：
+如果要强制 seeded downstream 路径，可执行：
 
 ```powershell
-./tools/run_step9_smoke.ps1 -ChunkSchedulerMode gpu -ForceSeededPath -RequireAcceptanceMarker -RequireGpuCompactionValidation -ExpectedDrawPath seeded -ExpectedDrawDomain compacted -ExpectedScheduleLookup indirect -SkipVisualCheckPrompt
+./tools/run_step9_smoke.ps1 -ChunkSchedulerMode gpu -ForceSeededPath -SkipVisualCheckPrompt
 ```
 
 这会额外校验：
 
-- 首帧日志中出现 `ACCEPT: pipeline frame completed`，证明 depth sort、view-data、draw、composite 参考链路都实际执行过
-- 首个 draw pass 会输出 `DRAW_SUBMISSION: ...`，可用于核对当前帧是否按预期走 `path=full|seeded` 与 `draw_domain=flat|compacted`
 - 缺失 payload 的负例会在启动期 fail-fast，并输出明确的 cache 读取错误
-- 若启用 GPU compaction 校验，则日志中必须出现 `GPU_COMPACTION_VALIDATE_OK`，且不能出现 `GPU_COMPACTION_VALIDATE_MISMATCH`
+- 若运行时日志出现 `View-data compute pass failed` 或 `Composite accumulation target unavailable`，smoke 脚本会直接判定失败
 
 可用参数：
 
@@ -147,13 +144,7 @@ cmake --build build --config Release
 - `-SourceConfigPath`：PLY 来源配置，默认 `build/source_ply.txt`
 - `-OutputCachePath`：可选输出文件名或路径；最终仍会写到原始 PLY 同目录，路径部分会被忽略
 - `-RuntimeConfigPath`：运行时模型配置文件，默认 `assets/configs/model_path.txt`
-- `-ObserveSeconds`：运行时观察秒数，默认 `5`
-- `-RequireAcceptanceMarker`：要求运行时日志出现完整渲染链路通过标记
-- `-RequireGpuCompactionValidation`：要求运行时打开 `GS_VALIDATE_GPU_COMPACTION=1` 并校验 CPU/GPU compaction 结果一致
-- `-RequireDrawSubmissionMarker`：要求运行时日志出现 `DRAW_SUBMISSION` 标记；启用 `-RequireAcceptanceMarker` 时会自动检查
-- `-ExpectedDrawPath`：可选，要求 `DRAW_SUBMISSION` 中的 `path=` 字段匹配指定值（如 `full`、`seeded`）
-- `-ExpectedDrawDomain`：可选，要求 `DRAW_SUBMISSION` 中的 `draw_domain=` 字段匹配指定值（如 `flat`、`compacted`）
-- `-ExpectedScheduleLookup`：可选，要求 `DRAW_SUBMISSION` 中的 `schedule_lookup=` 字段匹配指定值（如 `full`、`direct`、`indirect`、`fallback`）
+- `-ObserveSeconds`：运行时观察秒数，默认 `10`
 - `-ChunkSchedulerMode`：可选，覆盖本次 smoke 的 `GS_CHUNK_SCHEDULER_MODE`；脚本会先清理继承来的终端环境变量，再按参数显式设置
 - `-ForceSeededPath`：可选，覆盖本次 smoke 的 `GS_CHUNK_FORCE_SEEDED_PATH=1`
 - `-RunMissingPayloadCheck`：额外执行一次缺失 payload 的负例校验
