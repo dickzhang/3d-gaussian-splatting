@@ -28,7 +28,17 @@ namespace gs
 		GLuint keys_buffer{ 0 };
 		GLuint indices_buffer{ 0 };
 		GLuint view_data_buffer{ 0 };
+		GLuint draw_indirect_command_buffer{ 0 };
 	};
+
+	struct DrawArraysIndirectCommand
+	{
+		std::uint32_t count{ 0 };
+		std::uint32_t instance_count{ 0 };
+		std::uint32_t first{ 0 };
+		std::uint32_t base_instance{ 0 };
+	};
+	static_assert(sizeof(DrawArraysIndirectCommand) == 16, "Unexpected DrawArraysIndirectCommand size");
 
 	struct ChunkScheduleEntry
 	{

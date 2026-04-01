@@ -262,6 +262,7 @@ namespace gs
 
 		m_drawViewportSizeLoc = glGetUniformLocation(m_drawProgram.id(), "u_viewportSize");
 		m_drawUseAnisotropicLoc = glGetUniformLocation(m_drawProgram.id(), "u_useAnisotropic");
+		m_drawUseIndirectLookupLoc = glGetUniformLocation(m_drawProgram.id(), "u_useDrawIndirectLookup");
 
 		m_depthViewLoc = glGetUniformLocation(m_depthProgram.id(), "u_view");
 		m_depthModelLoc = glGetUniformLocation(m_depthProgram.id(), "u_model");
@@ -283,6 +284,7 @@ namespace gs
 		const bool uniformsOk =
 			m_drawViewportSizeLoc >= 0 &&
 			m_drawUseAnisotropicLoc >= 0 &&
+			m_drawUseIndirectLookupLoc >= 0 &&
 			m_depthViewLoc >= 0 &&
 			m_depthModelLoc >= 0 &&
 			m_depthRealCountLoc >= 0 &&
@@ -365,6 +367,7 @@ namespace gs
 		m_useSortedScheduleLookupThisFrame = false;
 		m_visibleScheduleScratch.clear();
 		m_visibleScheduleScratch.reserve(m_chunkCount);
+		m_loggedDrawSubmission = false;
 
 		emitRuntimeLog(std::cout, "Uploaded split-section asset: " + std::to_string(m_totalSplatCount) +
 			" splats to GPU (sort count: " + std::to_string(m_sortCount) +
@@ -436,6 +439,7 @@ namespace gs
 		GLint prevSsbo7 = 0;
 		GLint prevSsbo8 = 0;
 		GLint prevSsbo10 = 0;
+		GLint prevDrawIndirectBuffer = 0;
 		glGetIntegeri_v(GL_SHADER_STORAGE_BUFFER_BINDING, 0, &prevSsbo0);
 		glGetIntegeri_v(GL_SHADER_STORAGE_BUFFER_BINDING, 1, &prevSsbo1);
 		glGetIntegeri_v(GL_SHADER_STORAGE_BUFFER_BINDING, 2, &prevSsbo2);
@@ -446,9 +450,16 @@ namespace gs
 		glGetIntegeri_v(GL_SHADER_STORAGE_BUFFER_BINDING, 7, &prevSsbo7);
 		glGetIntegeri_v(GL_SHADER_STORAGE_BUFFER_BINDING, 8, &prevSsbo8);
 		glGetIntegeri_v(GL_SHADER_STORAGE_BUFFER_BINDING, 10, &prevSsbo10);
+		glGetIntegerv(GL_DRAW_INDIRECT_BUFFER_BINDING, &prevDrawIndirectBuffer);
 
 		const bool depthAndSortExecuted = prepareVisibleSplatDomain(view, projection);
-		bool canDraw = depthAndSortExecuted && m_activeSplatCount > 0;
+		bool canDraw = depthAndSortExecuted;
+		if (canDraw && !updateDrawIndirectCommand())
+		{
+			std::cerr << "Failed to update draw indirect command for current frame\n";
+			canDraw = false;
+		}
+		canDraw = canDraw && m_activeSplatCount > 0;
 		if (depthAndSortExecuted && m_activeSplatCount > 0)
 		{
 			runDepthAndSort(view);
@@ -501,6 +512,23 @@ namespace gs
 		{
 			drawGaussianPass(viewportWidth, viewportHeight, useReferencePath);
 			drawExecuted = true;
+			if (!m_loggedDrawSubmission)
+			{
+				m_loggedDrawSubmission = true;
+				emitRuntimeLog(
+					std::cout,
+					"DRAW_SUBMISSION: mode=indirect draw_calls=1 submitted_instances=" + std::to_string(m_activeSplatCount) +
+					" active_splats=" + std::to_string(m_activeSplatCount) +
+					" compacted_splats=" + std::to_string(m_compactedSplatCount) +
+					" scheduled_ranges=" + std::to_string(m_visibleScheduleEntryCount) +
+					" schedule_lookup=" + std::string(
+						m_useSeededIndicesThisFrame
+							? (m_useSortedScheduleLookupThisFrame ? "indirect" :
+								(m_scheduleEntriesSortedThisFrame ? "direct" : "fallback"))
+							: "full") +
+					" draw_domain=" + std::string(m_drawUseIndirectLookupThisFrame ? "compacted" : "flat") +
+					" path=" + std::string(m_useSeededIndicesThisFrame ? "seeded" : "full"));
+			}
 		}
 
 		bool compositeExecuted = false;
@@ -558,6 +586,7 @@ namespace gs
 							? (m_useSortedScheduleLookupThisFrame ? "indirect" :
 								(m_scheduleEntriesSortedThisFrame ? "direct" : "fallback"))
 							: "full") +
+					" draw_domain=" + std::string(m_drawUseIndirectLookupThisFrame ? "compacted" : "flat") +
 					" force_seeded=" + std::string(m_forceSeededPath ? "1" : "0") +
 					" visible_ratio=" + std::to_string(m_lastVisibleRatio) +
 				" active_splats=" + std::to_string(m_activeSplatCount) +
@@ -581,6 +610,7 @@ namespace gs
 		glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 7, static_cast<GLuint>(prevSsbo7));
 		glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 8, static_cast<GLuint>(prevSsbo8));
 		glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 10, static_cast<GLuint>(prevSsbo10));
+		glBindBuffer(GL_DRAW_INDIRECT_BUFFER, static_cast<GLuint>(prevDrawIndirectBuffer));
 
 		glDepthMask(wasDepthWrite);
 		glBlendFuncSeparate(
@@ -605,6 +635,49 @@ namespace gs
 		glUseProgram(static_cast<GLuint>(prevProgram));
 	}
 
+	bool GaussianRenderer::updateDrawIndirectCommand()
+	{
+		if (m_uploadBuffers.draw_indirect_command_buffer == 0)
+		{
+			return false;
+		}
+
+		if (m_activeSplatCount > static_cast<std::size_t>(std::numeric_limits<std::uint32_t>::max()))
+		{
+			std::cerr << "Active draw count exceeds indirect command uint32 range\n";
+			return false;
+		}
+
+		const DrawArraysIndirectCommand drawCommand{
+			6u,
+			static_cast<std::uint32_t>(m_activeSplatCount),
+			0u,
+			0u };
+
+		while (glGetError() != GL_NO_ERROR)
+		{
+			// Ignore pre-existing GL errors so this validation only reports failures
+			// caused by the indirect command upload itself.
+		}
+
+		glBindBuffer(GL_DRAW_INDIRECT_BUFFER, m_uploadBuffers.draw_indirect_command_buffer);
+		glBufferSubData(
+			GL_DRAW_INDIRECT_BUFFER,
+			0,
+			static_cast<GLsizeiptr>(sizeof(DrawArraysIndirectCommand)),
+			&drawCommand);
+		glBindBuffer(GL_DRAW_INDIRECT_BUFFER, 0);
+
+		const GLenum glError = glGetError();
+		if (glError != GL_NO_ERROR)
+		{
+			std::cerr << "Failed to upload draw indirect command, GL error: " << glError << "\n";
+			return false;
+		}
+
+		return true;
+	}
+
 	void GaussianRenderer::drawGaussianPass(float viewportWidth, float viewportHeight, bool useReferencePath)
 	{
 		glEnable(GL_BLEND);
@@ -623,11 +696,14 @@ namespace gs
 		m_drawProgram.use();
 		glUniform2f(m_drawViewportSizeLoc, viewportWidth, viewportHeight);
 		glUniform1i(m_drawUseAnisotropicLoc, m_useAnisotropic ? 1 : 0);
+		glUniform1i(m_drawUseIndirectLookupLoc, m_drawUseIndirectLookupThisFrame ? 1 : 0);
 
+		glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 1, m_uploadBuffers.indices_buffer);
 		glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 2, m_uploadBuffers.view_data_buffer);
 
 		glBindVertexArray(m_vao);
-		glDrawArraysInstanced(GL_TRIANGLES, 0, 6, static_cast<GLsizei>(m_activeSplatCount));
+		glBindBuffer(GL_DRAW_INDIRECT_BUFFER, m_uploadBuffers.draw_indirect_command_buffer);
+		glDrawArraysIndirect(GL_TRIANGLES, nullptr);
 	}
 
 	void GaussianRenderer::compositeAccumulationPass(GLint prevDrawFbo, GLint prevReadFbo, const std::array<GLint, 4>& prevViewport)
@@ -789,6 +865,7 @@ namespace gs
 		m_scheduleEntriesSortedThisFrame = false;
 		m_useSortedScheduleLookupThisFrame = false;
 		m_viewDataUseScheduleDomainThisFrame = false;
+		m_drawUseIndirectLookupThisFrame = false;
 	}
 
 	bool GaussianRenderer::shouldUseSeededIndices(bool previousSeededPath, float visibleRatio) const noexcept
@@ -877,6 +954,13 @@ namespace gs
 
 	bool GaussianRenderer::prepareVisibleSplatDomain(const glm::mat4& view, const glm::mat4& projection)
 	{
+		auto finalizeDrawDomain = [this]() noexcept
+		{
+			m_drawUseIndirectLookupThisFrame =
+				m_viewDataUseScheduleDomainThisFrame &&
+				(m_scheduleEntriesSortedThisFrame || m_useSortedScheduleLookupThisFrame);
+		};
+
 		const bool previousSeededPath = m_useSeededIndicesThisFrame;
 		resetActiveDomainToFull();
 		m_visibleChunkCount = m_chunkCount;
@@ -888,14 +972,17 @@ namespace gs
 		m_scheduleEntriesSortedThisFrame = false;
 		m_useSortedScheduleLookupThisFrame = false;
 		m_viewDataUseScheduleDomainThisFrame = false;
+		m_drawUseIndirectLookupThisFrame = false;
 
 		if (!m_hasChunkSchedulingSupport)
 		{
+			finalizeDrawDomain();
 			return true;
 		}
 
 		if (m_chunkSchedulerMode == ChunkSchedulerMode::Full)
 		{
+			finalizeDrawDomain();
 			return true;
 		}
 
@@ -906,11 +993,13 @@ namespace gs
 				std::cerr << "CPU chunk scheduler exceeded capacity, falling back to full domain for this frame\n";
 				resetActiveDomainToFull();
 			}
+			finalizeDrawDomain();
 			return true;
 		}
 
 		if (prepareVisibleSplatDomainGpu(view, projection, previousSeededPath))
 		{
+			finalizeDrawDomain();
 			return true;
 		}
 
@@ -920,6 +1009,7 @@ namespace gs
 			std::cerr << "CPU chunk scheduler exceeded capacity during fallback, using full domain for this frame\n";
 			resetActiveDomainToFull();
 		}
+		finalizeDrawDomain();
 		return true;
 	}
 
@@ -1280,6 +1370,7 @@ namespace gs
 			m_maxPointSize,
 			activeDomainPreculled,
 			m_viewDataUseScheduleDomainThisFrame,
+			m_drawUseIndirectLookupThisFrame,
 			m_scheduleEntriesSortedThisFrame,
 			m_useSortedScheduleLookupThisFrame,
 			m_useAnisotropic,

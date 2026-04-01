@@ -60,6 +60,7 @@ namespace gs
 		bool prepareSortedScheduleLookup(std::size_t scheduleEntryCount);
 		bool runScheduleCompaction(std::size_t scheduleEntryCount);
 		bool runBitonicSort(GLuint keyBuffer, GLuint indexBuffer, std::size_t count);
+		bool updateDrawIndirectCommand();
 		bool validateGpuCompactionResult(
 			const glm::mat4& view,
 			const glm::mat4& projection,
@@ -118,9 +119,11 @@ namespace gs
 		bool m_scheduleEntriesSortedThisFrame{ false }; // 当前帧 schedule entries 是否按 outputOffset 有序
 		bool m_useSortedScheduleLookupThisFrame{ false }; // 当前帧是否使用 sorted schedule index 间接查表
 		bool m_viewDataUseScheduleDomainThisFrame{ false }; // 当前帧 view-data 是否直接消费 schedule 域
+		bool m_drawUseIndirectLookupThisFrame{ false }; // 当前帧 draw 是否通过排序索引间接消费 compacted view-data 域
 
 		GLint m_drawViewportSizeLoc{ -1 }; // 绘制程序 u_viewportSize 位置
 		GLint m_drawUseAnisotropicLoc{ -1 }; // 绘制程序 u_useAnisotropic 位置
+		GLint m_drawUseIndirectLookupLoc{ -1 }; // 绘制程序 u_useDrawIndirectLookup 位置
 
 		GLint m_depthViewLoc{ -1 };         // 深度程序 u_view 位置
 		GLint m_depthModelLoc{ -1 };        // 深度程序 u_model 位置
@@ -145,6 +148,7 @@ namespace gs
 		bool m_loggedAcceptanceFrame{ false }; // 首帧完整链路验收标记是否已输出
 		bool m_loggedCompositeFallback{ false }; // 是否已输出 composite fallback 警告
 		bool m_loggedChunkSchedulingConfig{ false }; // 是否已输出 chunk 调度配置
+		bool m_loggedDrawSubmission{ false }; // 是否已输出 draw submission 验证日志
 		bool m_hasChunkSchedulingSupport{ false }; // 当前资产是否支持 chunk 驱动调度
 		bool m_useSeededIndicesThisFrame{ false }; // 当前帧是否启用 seeded indices 缩减排序域
 		bool m_forceSeededPath{ false }; // 是否强制走 seeded/schedule downstream 调试路径

@@ -1194,3 +1194,35 @@ src/
 	- `schedule_lookup=indirect`：GPU producer 先生成无序 schedule entry，再用 GPU 排序出按 `outputOffset` 有序的索引表，shader 间接二分。
 2. 只有当 schedule lookup 准备失败时，才需要回退到 compacted-index fallback。
 3. depth/view-data 这条链路现在已经更接近真正的 chunk schedule-aware downstream；后续如果继续推进，重点应转向 draw/domain 契约是否还需要 flat active-domain 语义。
+
+## draw 侧 compacted-domain 契约下推（2026-04-01）
+
+### 本次改动
+1. `assets/shaders/view_data.comp`
+	- 在 seeded direct/indirect 模式下，不再把 `GPUViewSplat` 固定写到 `viewSplats[id]` 这个“最终 draw-order 已经打平”的隐式域中。
+	- 改为先通过 `sortedIndices[id]` 取回 compacted schedule index，再把结果写到 `viewSplats[compactedIndex]`，使输出域与 schedule compact 后的逻辑域对齐。
+2. `assets/shaders/gaussian.vert`
+	- 新增对 `indices_buffer` 的显式读取；当 `u_useDrawIndirectLookup=1` 时，vertex shader 会通过 `sortedIndices[gl_InstanceID]` 找到当前实例对应的 compacted schedule index，再读取 `viewSplats[compactedIndex]`。
+	- full/fallback 路径下仍保持原来的 `viewSplats[gl_InstanceID]` 读取方式，不改变默认主路径。
+3. `src/render/ViewDataPipeline.h/.cpp`
+	- 新增 `u_writeCompactedViewData` 契约开关，由 renderer 显式告诉 view-data pass 当前写出的到底是 flat draw-order 域还是 compacted schedule 域。
+4. `src/render/GaussianRenderer.h/.cpp`
+	- 新增 `m_drawUseIndirectLookupThisFrame`，把 draw 侧当前消费的是 `flat` 还是 `compacted` 变成显式状态，而不再由 shader 隐式假设。
+	- `CHUNK_DEBUG` 日志新增 `draw_domain` 字段，用于区分 `flat` 与 `compacted`。
+
+### 本次验证结果
+1. `cmake --build build --config Release --target gaussian_splatting_gl` 通过。
+2. 强制 seeded 验证日志确认：
+	- `ACCEPT: pipeline frame completed`
+	- `producer=gpu`
+	- `path=seeded`
+	- `schedule_lookup=indirect`
+	- `draw_domain=compacted`
+	- `GPU_COMPACTION_VALIDATE_OK`
+
+### 当前结论
+1. draw 侧现在已经开始显式消费 compacted schedule domain，而不是完全依赖“view_data 已经按最终 draw-order 打平”的隐式前提。
+2. 当前真正仍保留的 flat active-domain 语义，更多是 draw submission 形式本身仍是单次 `glDrawArraysInstanced(active_splat_count)`，而不是 view-data / vertex fetch 之间的数据契约。
+3. 后续如果继续推进，更自然的方向将是评估：
+	- 是否要把 draw submission 本身也变成更显式的 range/indirection 驱动；
+	- 以及是否有必要为 seeded path 引入更低开销的 draw-time indirection 形式，减少 vertex shader 对 `indices_buffer` 的重复读取。

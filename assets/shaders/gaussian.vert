@@ -11,8 +11,13 @@ layout(std430, binding = 2) readonly buffer ViewDataBuffer {
     GPUViewSplat viewSplats[];
 };
 
+layout(std430, binding = 1) readonly buffer SortedIndexBuffer {
+    uint sortedIndices[];
+};
+
 uniform vec2 u_viewportSize;
 uniform int u_useAnisotropic;
+uniform int u_useDrawIndirectLookup;
 
 out vec3 vColor;
 out float vOpacity;
@@ -21,7 +26,21 @@ out float vHalfExtentPx;
 out vec2 vLocalPx;
 
 void main() {
-    GPUViewSplat viewData = viewSplats[gl_InstanceID];
+    uint viewDataIndex = uint(gl_InstanceID);
+    if (u_useDrawIndirectLookup != 0) {
+        viewDataIndex = sortedIndices[viewDataIndex];
+        if (viewDataIndex == 0xFFFFFFFFu) {
+            gl_Position = vec4(3.0, 3.0, 3.0, 1.0);
+            vColor = vec3(0.0);
+            vOpacity = 0.0;
+            vInvCov2D = vec3(1.0, 0.0, 1.0);
+            vHalfExtentPx = 1.0;
+            vLocalPx = vec2(0.0);
+            return;
+        }
+    }
+
+    GPUViewSplat viewData = viewSplats[viewDataIndex];
     if (viewData.colorOpacity.a <= 0.0) {
         gl_Position = vec4(3.0, 3.0, 3.0, 1.0);
         vColor = vec3(0.0);

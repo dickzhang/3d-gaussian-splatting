@@ -85,12 +85,12 @@ cmake --build build --config Release
 - 可见比例 `>= 0.90`：退回 full-domain 路径
 - 中间区间：保持上一帧路径，避免频繁抖动
 
-当前调度会先以 chunk 为粒度生成 `scheduled_ranges`，并统一通过 GPU `schedule_compact` pass 展开到 `indices_buffer`，再供既有 depth/sort 路径消费。这意味着主路径已经去掉了每帧 CPU 逐 splat visible-index 构建与上传热路径；producer 端与 compaction 端现在都在 GPU 上完成。当前 downstream 的真实语义是：CPU 生成的 schedule 若按 `outputOffset` 有序，可直接按 `scheduled_ranges` 二分反查 chunk；GPU 生成的 schedule 会额外构建一份“按 `outputOffset` 排序后的 schedule 索引表”，depth/view-data 通过这份索引表做间接二分查找，从而在 seeded path 上继续直接消费 schedule domain，而不是再退回 `findChunkIndex()` 粗查路径。仅当这一步排序准备失败时，才回退为消费已经 compact 完成的 `indices_buffer` / `sortedIndices`。
+当前调度会先以 chunk 为粒度生成 `scheduled_ranges`，并统一通过 GPU `schedule_compact` pass 展开到 `indices_buffer`，再供既有 depth/sort 路径消费。这意味着主路径已经去掉了每帧 CPU 逐 splat visible-index 构建与上传热路径；producer 端与 compaction 端现在都在 GPU 上完成。当前 downstream 的真实语义是：CPU 生成的 schedule 若按 `outputOffset` 有序，可直接按 `scheduled_ranges` 二分反查 chunk；GPU 生成的 schedule 会额外构建一份“按 `outputOffset` 排序后的 schedule 索引表”，depth/view-data 通过这份索引表做间接二分查找，从而在 seeded path 上继续直接消费 schedule domain，而不是再退回 `findChunkIndex()` 粗查路径。仅当这一步排序准备失败时，才回退为消费已经 compact 完成的 `indices_buffer` / `sortedIndices`。进一步地，draw 侧现在也不再默认假设 `view_data.comp` 已经把结果按最终 draw-order 打平成连续数组：在 seeded direct/indirect 模式下，`view_data.comp` 会改为按 compacted schedule domain 写 `GPUViewSplat`，而 `gaussian.vert` 再通过排序后的 `indices_buffer` 间接取回对应的 compacted 记录；只有 full/fallback 路径仍继续沿用 flat draw-order 语义。
 
 ### 环境变量
 
 - `GS_RUNTIME_LOG_FILE`：可选。若设置为文件路径，运行时会把关键启动/验收日志追加写入该文件。
-- `GS_DEBUG_CHUNKS`：可选。设为 `1` 后，运行时会定期输出 chunk 调试统计，包括 `producer`、`path`、`schedule_lookup`、`visible_ratio`、`visible_chunks`、`scheduled_ranges`、`compacted_splats`、`active_splats`、`active_sort_count`、`processed_splats`、`chunk_tests` 与 `chunk_culled_splats`。
+- `GS_DEBUG_CHUNKS`：可选。设为 `1` 后，运行时会定期输出 chunk 调试统计，包括 `producer`、`path`、`schedule_lookup`、`draw_domain`、`visible_ratio`、`visible_chunks`、`scheduled_ranges`、`compacted_splats`、`active_splats`、`active_sort_count`、`processed_splats`、`chunk_tests` 与 `chunk_culled_splats`。
 - `GS_CHUNK_ENABLE_RATIO`：可选。覆盖 seeded path 的启用阈值，范围 `[0, 1]`。
 - `GS_CHUNK_DISABLE_RATIO`：可选。覆盖 seeded path 的退出阈值，范围 `[0, 1]`，且必须大于 `GS_CHUNK_ENABLE_RATIO`。
 - `GS_CHUNK_SCHEDULER_MODE`：可选。支持 `auto`、`cpu`、`gpu`、`full`，用于现场比较 GPU compaction、CPU fallback 和 full-domain 行为。
@@ -125,12 +125,19 @@ cmake --build build --config Release
 如果要同时验证 GPU chunk scheduler 生成的 compaction 域与 CPU 参考结果一致，可执行：
 
 ```powershell
-./tools/run_step9_smoke.ps1 -RequireAcceptanceMarker -RequireGpuCompactionValidation -SkipVisualCheckPrompt
+./tools/run_step9_smoke.ps1 -ChunkSchedulerMode gpu -RequireAcceptanceMarker -RequireGpuCompactionValidation -ExpectedDrawPath full -ExpectedDrawDomain flat -ExpectedScheduleLookup full -SkipVisualCheckPrompt
+```
+
+如果要强制 seeded downstream 并确认 draw 侧继续消费 compacted domain，可执行：
+
+```powershell
+./tools/run_step9_smoke.ps1 -ChunkSchedulerMode gpu -ForceSeededPath -RequireAcceptanceMarker -RequireGpuCompactionValidation -ExpectedDrawPath seeded -ExpectedDrawDomain compacted -ExpectedScheduleLookup indirect -SkipVisualCheckPrompt
 ```
 
 这会额外校验：
 
 - 首帧日志中出现 `ACCEPT: pipeline frame completed`，证明 depth sort、view-data、draw、composite 参考链路都实际执行过
+- 首个 draw pass 会输出 `DRAW_SUBMISSION: ...`，可用于核对当前帧是否按预期走 `path=full|seeded` 与 `draw_domain=flat|compacted`
 - 缺失 payload 的负例会在启动期 fail-fast，并输出明确的 cache 读取错误
 - 若启用 GPU compaction 校验，则日志中必须出现 `GPU_COMPACTION_VALIDATE_OK`，且不能出现 `GPU_COMPACTION_VALIDATE_MISMATCH`
 
@@ -143,6 +150,12 @@ cmake --build build --config Release
 - `-ObserveSeconds`：运行时观察秒数，默认 `5`
 - `-RequireAcceptanceMarker`：要求运行时日志出现完整渲染链路通过标记
 - `-RequireGpuCompactionValidation`：要求运行时打开 `GS_VALIDATE_GPU_COMPACTION=1` 并校验 CPU/GPU compaction 结果一致
+- `-RequireDrawSubmissionMarker`：要求运行时日志出现 `DRAW_SUBMISSION` 标记；启用 `-RequireAcceptanceMarker` 时会自动检查
+- `-ExpectedDrawPath`：可选，要求 `DRAW_SUBMISSION` 中的 `path=` 字段匹配指定值（如 `full`、`seeded`）
+- `-ExpectedDrawDomain`：可选，要求 `DRAW_SUBMISSION` 中的 `draw_domain=` 字段匹配指定值（如 `flat`、`compacted`）
+- `-ExpectedScheduleLookup`：可选，要求 `DRAW_SUBMISSION` 中的 `schedule_lookup=` 字段匹配指定值（如 `full`、`direct`、`indirect`、`fallback`）
+- `-ChunkSchedulerMode`：可选，覆盖本次 smoke 的 `GS_CHUNK_SCHEDULER_MODE`；脚本会先清理继承来的终端环境变量，再按参数显式设置
+- `-ForceSeededPath`：可选，覆盖本次 smoke 的 `GS_CHUNK_FORCE_SEEDED_PATH=1`
 - `-RunMissingPayloadCheck`：额外执行一次缺失 payload 的负例校验
 - `-SkipVisualCheckPrompt`：跳过人工确认提示
 - `-KeepViewerOpen`：保持查看器窗口打开

@@ -69,6 +69,7 @@ namespace gs
 		glGenBuffers(1, &out_handles.keys_buffer);
 		glGenBuffers(1, &out_handles.indices_buffer);
 		glGenBuffers(1, &out_handles.view_data_buffer);
+		glGenBuffers(1, &out_handles.draw_indirect_command_buffer);
 
 		if (out_handles.splat_buffer == 0 ||
 			out_handles.position_buffer == 0 ||
@@ -83,7 +84,8 @@ namespace gs
 			out_handles.view_stats_buffer == 0 ||
 			out_handles.keys_buffer == 0 ||
 			out_handles.indices_buffer == 0 ||
-			out_handles.view_data_buffer == 0)
+			out_handles.view_data_buffer == 0 ||
+			out_handles.draw_indirect_command_buffer == 0)
 		{
 			destroy(out_handles);
 			return false;
@@ -164,6 +166,11 @@ namespace gs
 			glDeleteBuffers(1, &handles.view_data_buffer);
 			handles.view_data_buffer = 0;
 		}
+		if (handles.draw_indirect_command_buffer != 0)
+		{
+			glDeleteBuffers(1, &handles.draw_indirect_command_buffer);
+			handles.draw_indirect_command_buffer = 0;
+		}
 	}
 
 	bool GpuUploadBuffers::upload_split_splats(
@@ -190,7 +197,8 @@ namespace gs
 			handles.view_stats_buffer == 0 ||
 			handles.keys_buffer == 0 ||
 			handles.indices_buffer == 0 ||
-			handles.view_data_buffer == 0)
+			handles.view_data_buffer == 0 ||
+			handles.draw_indirect_command_buffer == 0)
 		{
 			std::cerr << "GPU split upload buffers are not initialized\n";
 			return false;
@@ -308,6 +316,18 @@ namespace gs
 			nullptr,
 			GL_DYNAMIC_DRAW);
 
+		const DrawArraysIndirectCommand initial_draw_command{
+			6u,
+			static_cast<std::uint32_t>(new_splat_count),
+			0u,
+			0u };
+		glBindBuffer(GL_DRAW_INDIRECT_BUFFER, handles.draw_indirect_command_buffer);
+		glBufferData(
+			GL_DRAW_INDIRECT_BUFFER,
+			static_cast<GLsizeiptr>(sizeof(DrawArraysIndirectCommand)),
+			&initial_draw_command,
+			GL_DYNAMIC_DRAW);
+
 		const GLsizeiptr scheduleBufferSize = asset.chunks.empty()
 			? 0
 			: static_cast<GLsizeiptr>(asset.chunks.size() * sizeof(ChunkScheduleEntry));
@@ -351,6 +371,7 @@ namespace gs
 			GL_DYNAMIC_DRAW);
 
 		glBindBuffer(GL_SHADER_STORAGE_BUFFER, 0);
+		glBindBuffer(GL_DRAW_INDIRECT_BUFFER, 0);
 
 		const GLenum upload_err = glGetError();
 		if (upload_err != GL_NO_ERROR)

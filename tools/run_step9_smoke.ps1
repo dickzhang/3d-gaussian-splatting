@@ -6,6 +6,13 @@ param(
     [int]$ObserveSeconds = 10,
     [switch]$RequireAcceptanceMarker,
     [switch]$RequireGpuCompactionValidation,
+    [switch]$RequireDrawSubmissionMarker,
+    [string]$ExpectedDrawPath = "",
+    [string]$ExpectedDrawDomain = "",
+    [string]$ExpectedScheduleLookup = "",
+    [ValidateSet("", "auto", "cpu", "gpu", "full")]
+    [string]$ChunkSchedulerMode = "",
+    [switch]$ForceSeededPath,
     [switch]$RunMissingPayloadCheck,
     [switch]$SkipVisualCheckPrompt,
     [switch]$KeepViewerOpen
@@ -128,6 +135,9 @@ function Invoke-RuntimeValidation {
     $process = $null
     try {
         $envAssignments = @(
+            'set "GS_CHUNK_SCHEDULER_MODE="',
+            'set "GS_CHUNK_FORCE_SEEDED_PATH="',
+            'set "GS_VALIDATE_GPU_COMPACTION="',
             ('set "GS_RUNTIME_LOG_FILE={0}"' -f $validationLogPath)
         )
         foreach ($entry in $ExtraEnvironment.GetEnumerator()) {
@@ -199,6 +209,31 @@ function Test-LogContains {
     )
 
     return @($Lines | Where-Object { $_ -like "*$Pattern*" }).Length -gt 0
+}
+
+function Test-DrawSubmissionMarker {
+    param(
+        [string[]]$Lines,
+        [string]$ExpectedPath,
+        [string]$ExpectedDomain,
+        [string]$ExpectedLookup
+    )
+
+    $matches = @($Lines | Where-Object { $_ -like "*DRAW_SUBMISSION:*" })
+    if ($matches.Length -eq 0) {
+        return $false
+    }
+
+    foreach ($line in $matches) {
+        $pathOk = [string]::IsNullOrWhiteSpace($ExpectedPath) -or $line.Contains("path=$ExpectedPath")
+        $domainOk = [string]::IsNullOrWhiteSpace($ExpectedDomain) -or $line.Contains("draw_domain=$ExpectedDomain")
+        $lookupOk = [string]::IsNullOrWhiteSpace($ExpectedLookup) -or $line.Contains("schedule_lookup=$ExpectedLookup")
+        if ($pathOk -and $domainOk -and $lookupOk) {
+            return $true
+        }
+    }
+
+    return $false
 }
 
 function Get-FirstExistingPayloadPath {
@@ -294,6 +329,12 @@ Invoke-StepCommand "Launch Runtime" {
     if ($RequireGpuCompactionValidation) {
         $extraEnvironment["GS_VALIDATE_GPU_COMPACTION"] = "1"
     }
+    if (-not [string]::IsNullOrWhiteSpace($ChunkSchedulerMode)) {
+        $extraEnvironment["GS_CHUNK_SCHEDULER_MODE"] = $ChunkSchedulerMode
+    }
+    if ($ForceSeededPath) {
+        $extraEnvironment["GS_CHUNK_FORCE_SEEDED_PATH"] = "1"
+    }
 
     $runtimeResult = Invoke-RuntimeValidation -RuntimeExePath $runtimeExePath -RuntimeConfigFile $runtimeConfigPath -CacheManifestPath $outputCachePath -ObserveDurationSeconds $ObserveSeconds -LeaveViewerRunning $KeepViewerOpen.IsPresent -AllowFailure $false -ExtraEnvironment $extraEnvironment
     $combinedLogs = @($runtimeResult.ValidationLog + $runtimeResult.Stdout + $runtimeResult.Stderr)
@@ -309,6 +350,13 @@ Invoke-StepCommand "Launch Runtime" {
             throw "View-data pipeline reported a failure during acceptance run"
         }
         Write-Host "Acceptance marker validation passed."
+    }
+
+    if ($RequireDrawSubmissionMarker -or $RequireAcceptanceMarker) {
+        if (-not (Test-DrawSubmissionMarker -Lines $combinedLogs -ExpectedPath $ExpectedDrawPath -ExpectedDomain $ExpectedDrawDomain -ExpectedLookup $ExpectedScheduleLookup)) {
+            throw "Draw submission marker not found in runtime logs, or it did not match the expected path/domain/lookup"
+        }
+        Write-Host "Draw submission marker validation passed."
     }
 
     if ($RequireGpuCompactionValidation) {
@@ -341,12 +389,16 @@ if ($RequireAcceptanceMarker) {
     Write-Host "4. Confirm logs contain: ACCEPT: pipeline frame completed"
 }
 
+if ($RequireDrawSubmissionMarker -or $RequireAcceptanceMarker) {
+    Write-Host "5. Confirm logs contain: DRAW_SUBMISSION with the expected path/domain/lookup fields."
+}
+
 if ($RequireGpuCompactionValidation) {
-    Write-Host "5. Confirm logs contain: GPU_COMPACTION_VALIDATE_OK and no mismatch marker."
+    Write-Host "6. Confirm logs contain: GPU_COMPACTION_VALIDATE_OK and no mismatch marker."
 }
 
 if ($RunMissingPayloadCheck) {
-    Write-Host "6. Confirm missing-payload validation fails with explicit cache-read diagnostics."
+    Write-Host "7. Confirm missing-payload validation fails with explicit cache-read diagnostics."
 }
 
 if (-not $SkipVisualCheckPrompt) {

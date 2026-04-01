@@ -100,6 +100,7 @@ uniform vec2 u_viewportSize;
 uniform float u_maxPointSize;
 uniform int u_activeDomainPreculled;
 uniform int u_useScheduleDomain;
+uniform int u_writeCompactedViewData;
 uniform int u_scheduleEntriesSorted;
 uniform int u_useSortedScheduleLookup;
 uniform int u_useAnisotropic;
@@ -223,11 +224,11 @@ mat3 quatToMat3(vec4 q) {
     );
 }
 
-void writeInvalid(uint id) {
-    viewSplats[id].clipPos = vec4(3.0, 3.0, 3.0, 1.0);
-    viewSplats[id].colorOpacity = vec4(0.0, 0.0, 0.0, 0.0);
-    viewSplats[id].invCovHalf = vec4(1.0, 0.0, 1.0, 1.0);
-    viewSplats[id].basisPacked = vec4(0.0);
+void writeInvalid(uint outputIndex) {
+    viewSplats[outputIndex].clipPos = vec4(3.0, 3.0, 3.0, 1.0);
+    viewSplats[outputIndex].colorOpacity = vec4(0.0, 0.0, 0.0, 0.0);
+    viewSplats[outputIndex].invCovHalf = vec4(1.0, 0.0, 1.0, 1.0);
+    viewSplats[outputIndex].basisPacked = vec4(0.0);
 }
 
 void main() {
@@ -238,25 +239,32 @@ void main() {
 
     uint i = 0xFFFFFFFFu;
     uint compactedIndex = id;
+    uint outputIndex = id;
     int chunkIndex = -1;
     if (u_useScheduleDomain != 0) {
         if (u_scheduleEntriesSorted != 0 || u_useSortedScheduleLookup != 0) {
             compactedIndex = sortedIndices[id];
             if (compactedIndex == 0xFFFFFFFFu) {
-                writeInvalid(id);
+                if (u_writeCompactedViewData == 0) {
+                    writeInvalid(id);
+                }
                 return;
+            }
+
+            if (u_writeCompactedViewData != 0) {
+                outputIndex = compactedIndex;
             }
 
             int scheduleIndex = findScheduleIndex(compactedIndex);
             if (scheduleIndex < 0) {
-                writeInvalid(id);
+                writeInvalid(outputIndex);
                 return;
             }
 
             ChunkScheduleEntry schedule = loadScheduleEntry(uint(scheduleIndex));
             chunkIndex = int(schedule.chunkIndex);
             if (chunkIndex < 0 || uint(chunkIndex) >= u_chunkCount) {
-                writeInvalid(id);
+                writeInvalid(outputIndex);
                 return;
             }
 
@@ -265,14 +273,14 @@ void main() {
         } else {
             i = sortedIndices[id];
             if (i == 0xFFFFFFFFu) {
-                writeInvalid(id);
+                writeInvalid(outputIndex);
                 return;
             }
         }
     } else {
         i = sortedIndices[id];
         if (i == 0xFFFFFFFFu) {
-            writeInvalid(id);
+            writeInvalid(outputIndex);
             return;
         }
     }
@@ -288,7 +296,7 @@ void main() {
         }
         if (chunkIndex >= 0 && !isChunkVisible(chunks[chunkIndex])) {
             atomicAdd(gChunkCulledSplats, 1u);
-            writeInvalid(id);
+            writeInvalid(outputIndex);
             return;
         }
     }
@@ -512,8 +520,8 @@ void main() {
         }
     }
 
-    viewSplats[id].clipPos = clipPos;
-    viewSplats[id].colorOpacity = vec4(max(color, vec3(0.0)), po.w);
-    viewSplats[id].invCovHalf = vec4(invCov2D, halfExtentPx);
-    viewSplats[id].basisPacked = vec4(basisMajor, basisMinor);
+    viewSplats[outputIndex].clipPos = clipPos;
+    viewSplats[outputIndex].colorOpacity = vec4(max(color, vec3(0.0)), po.w);
+    viewSplats[outputIndex].invCovHalf = vec4(invCov2D, halfExtentPx);
+    viewSplats[outputIndex].basisPacked = vec4(basisMajor, basisMinor);
 }
