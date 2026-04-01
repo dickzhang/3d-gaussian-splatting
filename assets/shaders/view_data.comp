@@ -89,6 +89,10 @@ layout(std430, binding = 9) readonly buffer ScheduleBuffer {
     ChunkScheduleEntry scheduleEntries[];
 };
 
+layout(std430, binding = 10) readonly buffer SortedScheduleIndexBuffer {
+    uint sortedScheduleIndices[];
+};
+
 uniform mat4 u_view;
 uniform mat4 u_model;
 uniform mat4 u_proj;
@@ -96,6 +100,8 @@ uniform vec2 u_viewportSize;
 uniform float u_maxPointSize;
 uniform int u_activeDomainPreculled;
 uniform int u_useScheduleDomain;
+uniform int u_scheduleEntriesSorted;
+uniform int u_useSortedScheduleLookup;
 uniform int u_useAnisotropic;
 uniform vec3 u_cameraPos;
 uniform int u_shDegree;
@@ -134,7 +140,16 @@ int findChunkIndex(uint sourceIndex) {
     return -1;
 }
 
-int findScheduleIndex(uint sortedIndex) {
+ChunkScheduleEntry loadScheduleEntry(uint logicalIndex) {
+    uint scheduleIndex = logicalIndex;
+    if (u_useSortedScheduleLookup != 0) {
+        scheduleIndex = sortedScheduleIndices[logicalIndex];
+    }
+
+    return scheduleEntries[scheduleIndex];
+}
+
+int findScheduleIndex(uint compactedIndex) {
     if (u_scheduleEntryCount == 0u) {
         return -1;
     }
@@ -143,11 +158,12 @@ int findScheduleIndex(uint sortedIndex) {
     uint right = u_scheduleEntryCount;
     while (left < right) {
         uint mid = left + ((right - left) >> 1u);
-        uint startOffset = scheduleEntries[mid].outputOffset;
-        uint endOffset = startOffset + scheduleEntries[mid].splatCount;
-        if (sortedIndex < startOffset) {
+        ChunkScheduleEntry schedule = loadScheduleEntry(mid);
+        uint startOffset = schedule.outputOffset;
+        uint endOffset = startOffset + schedule.splatCount;
+        if (compactedIndex < startOffset) {
             right = mid;
-        } else if (sortedIndex >= endOffset) {
+        } else if (compactedIndex >= endOffset) {
             left = mid + 1u;
         } else {
             return int(mid);
@@ -221,24 +237,38 @@ void main() {
     }
 
     uint i = 0xFFFFFFFFu;
-    int scheduleIndex = -1;
+    uint compactedIndex = id;
     int chunkIndex = -1;
     if (u_useScheduleDomain != 0) {
-        scheduleIndex = findScheduleIndex(id);
-        if (scheduleIndex < 0) {
-            writeInvalid(id);
-            return;
-        }
+        if (u_scheduleEntriesSorted != 0 || u_useSortedScheduleLookup != 0) {
+            compactedIndex = sortedIndices[id];
+            if (compactedIndex == 0xFFFFFFFFu) {
+                writeInvalid(id);
+                return;
+            }
 
-        ChunkScheduleEntry schedule = scheduleEntries[scheduleIndex];
-        chunkIndex = int(schedule.chunkIndex);
-        if (chunkIndex < 0 || uint(chunkIndex) >= u_chunkCount) {
-            writeInvalid(id);
-            return;
-        }
+            int scheduleIndex = findScheduleIndex(compactedIndex);
+            if (scheduleIndex < 0) {
+                writeInvalid(id);
+                return;
+            }
 
-        uint localOffset = id - schedule.outputOffset;
-        i = chunks[chunkIndex].rangeData.x + localOffset;
+            ChunkScheduleEntry schedule = loadScheduleEntry(uint(scheduleIndex));
+            chunkIndex = int(schedule.chunkIndex);
+            if (chunkIndex < 0 || uint(chunkIndex) >= u_chunkCount) {
+                writeInvalid(id);
+                return;
+            }
+
+            uint localOffset = compactedIndex - schedule.outputOffset;
+            i = chunks[chunkIndex].rangeData.x + localOffset;
+        } else {
+            i = sortedIndices[id];
+            if (i == 0xFFFFFFFFu) {
+                writeInvalid(id);
+                return;
+            }
+        }
     } else {
         i = sortedIndices[id];
         if (i == 0xFFFFFFFFu) {

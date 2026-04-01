@@ -40,6 +40,8 @@ namespace gs
 			float max_point_size,
 			bool active_domain_preculled,
 			bool use_schedule_domain,
+			bool schedule_entries_sorted,
+			bool use_sorted_schedule_lookup,
 			bool use_anisotropic,
 			int sh_degree,
 			std::size_t chunk_count,
@@ -56,6 +58,8 @@ namespace gs
 		GLint m_max_point_size_loc{ -1 };
 		GLint m_active_domain_preculled_loc{ -1 };
 		GLint m_use_schedule_domain_loc{ -1 };
+		GLint m_schedule_entries_sorted_loc{ -1 };
+		GLint m_use_sorted_schedule_lookup_loc{ -1 };
 		GLint m_use_anisotropic_loc{ -1 };
 		GLint m_camera_pos_loc{ -1 };
 		GLint m_sh_degree_loc{ -1 };

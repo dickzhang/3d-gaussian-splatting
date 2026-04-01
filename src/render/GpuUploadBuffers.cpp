@@ -62,6 +62,8 @@ namespace gs
 		glGenBuffers(1, &out_handles.sh_buffer);
 		glGenBuffers(1, &out_handles.chunk_buffer);
 		glGenBuffers(1, &out_handles.chunk_schedule_buffer);
+		glGenBuffers(1, &out_handles.chunk_schedule_sort_keys_buffer);
+		glGenBuffers(1, &out_handles.chunk_schedule_sort_indices_buffer);
 		glGenBuffers(1, &out_handles.chunk_scheduler_stats_buffer);
 		glGenBuffers(1, &out_handles.view_stats_buffer);
 		glGenBuffers(1, &out_handles.keys_buffer);
@@ -75,6 +77,8 @@ namespace gs
 			out_handles.sh_buffer == 0 ||
 			out_handles.chunk_buffer == 0 ||
 			out_handles.chunk_schedule_buffer == 0 ||
+			out_handles.chunk_schedule_sort_keys_buffer == 0 ||
+			out_handles.chunk_schedule_sort_indices_buffer == 0 ||
 			out_handles.chunk_scheduler_stats_buffer == 0 ||
 			out_handles.view_stats_buffer == 0 ||
 			out_handles.keys_buffer == 0 ||
@@ -125,6 +129,16 @@ namespace gs
 			glDeleteBuffers(1, &handles.chunk_schedule_buffer);
 			handles.chunk_schedule_buffer = 0;
 		}
+		if (handles.chunk_schedule_sort_keys_buffer != 0)
+		{
+			glDeleteBuffers(1, &handles.chunk_schedule_sort_keys_buffer);
+			handles.chunk_schedule_sort_keys_buffer = 0;
+		}
+		if (handles.chunk_schedule_sort_indices_buffer != 0)
+		{
+			glDeleteBuffers(1, &handles.chunk_schedule_sort_indices_buffer);
+			handles.chunk_schedule_sort_indices_buffer = 0;
+		}
 		if (handles.chunk_scheduler_stats_buffer != 0)
 		{
 			glDeleteBuffers(1, &handles.chunk_scheduler_stats_buffer);
@@ -170,6 +184,8 @@ namespace gs
 			handles.sh_buffer == 0 ||
 			handles.chunk_buffer == 0 ||
 			handles.chunk_schedule_buffer == 0 ||
+			handles.chunk_schedule_sort_keys_buffer == 0 ||
+			handles.chunk_schedule_sort_indices_buffer == 0 ||
 			handles.chunk_scheduler_stats_buffer == 0 ||
 			handles.view_stats_buffer == 0 ||
 			handles.keys_buffer == 0 ||
@@ -199,9 +215,15 @@ namespace gs
 		}
 
 		const std::size_t new_sort_count = next_pow2(new_splat_count);
+		const std::size_t new_chunk_schedule_sort_count = asset.chunks.empty() ? 0 : next_pow2(asset.chunks.size());
 		if (new_sort_count > static_cast<std::size_t>(std::numeric_limits<GLuint>::max()))
 		{
 			std::cerr << "Model too large for current GPU sorting path\n";
+			return false;
+		}
+		if (new_chunk_schedule_sort_count > static_cast<std::size_t>(std::numeric_limits<GLuint>::max()))
+		{
+			std::cerr << "Chunk schedule too large for current GPU sorting path\n";
 			return false;
 		}
 
@@ -215,6 +237,7 @@ namespace gs
 			asset.chunks.size() > static_cast<std::size_t>(std::numeric_limits<GLsizeiptr>::max()) / sizeof(SplatCacheChunkEntry) ||
 			asset.chunks.size() > static_cast<std::size_t>(std::numeric_limits<GLsizeiptr>::max()) / sizeof(ChunkScheduleEntry) ||
 			new_splat_count > static_cast<std::size_t>(std::numeric_limits<GLsizeiptr>::max()) / sizeof(GPUViewSplat) ||
+			new_chunk_schedule_sort_count > static_cast<std::size_t>(std::numeric_limits<GLsizeiptr>::max()) / sizeof(std::uint32_t) ||
 			init_keys.size() > static_cast<std::size_t>(std::numeric_limits<GLsizeiptr>::max()) / sizeof(std::uint32_t) ||
 			init_indices.size() > static_cast<std::size_t>(std::numeric_limits<GLsizeiptr>::max()) / sizeof(std::uint32_t))
 		{
@@ -295,6 +318,22 @@ namespace gs
 			nullptr,
 			GL_DYNAMIC_DRAW);
 
+		const GLsizeiptr scheduleSortBufferSize = new_chunk_schedule_sort_count == 0
+			? 0
+			: static_cast<GLsizeiptr>(new_chunk_schedule_sort_count * sizeof(std::uint32_t));
+		glBindBuffer(GL_SHADER_STORAGE_BUFFER, handles.chunk_schedule_sort_keys_buffer);
+		glBufferData(
+			GL_SHADER_STORAGE_BUFFER,
+			scheduleSortBufferSize,
+			nullptr,
+			GL_DYNAMIC_DRAW);
+		glBindBuffer(GL_SHADER_STORAGE_BUFFER, handles.chunk_schedule_sort_indices_buffer);
+		glBufferData(
+			GL_SHADER_STORAGE_BUFFER,
+			scheduleSortBufferSize,
+			nullptr,
+			GL_DYNAMIC_DRAW);
+
 		const ChunkSchedulerStats emptySchedulerStats{};
 		glBindBuffer(GL_SHADER_STORAGE_BUFFER, handles.chunk_scheduler_stats_buffer);
 		glBufferData(
@@ -323,6 +362,7 @@ namespace gs
 		out_stats.splat_count = new_splat_count;
 		out_stats.sort_count = new_sort_count;
 		out_stats.chunk_count = asset.chunks.size();
+		out_stats.chunk_schedule_sort_count = new_chunk_schedule_sort_count;
 		out_stats.max_supported_sh_degree = std::max(0, std::min(kMaxShDegree, asset.max_sh_degree));
 		return true;
 	}

@@ -21,6 +21,8 @@ namespace gs
 		GLuint sh_buffer{ 0 };
 		GLuint chunk_buffer{ 0 };
 		GLuint chunk_schedule_buffer{ 0 };
+		GLuint chunk_schedule_sort_keys_buffer{ 0 };
+		GLuint chunk_schedule_sort_indices_buffer{ 0 };
 		GLuint chunk_scheduler_stats_buffer{ 0 };
 		GLuint view_stats_buffer{ 0 };
 		GLuint keys_buffer{ 0 };
@@ -60,6 +62,7 @@ namespace gs
 		std::size_t splat_count{ 0 };
 		std::size_t sort_count{ 0 };
 		std::size_t chunk_count{ 0 };
+		std::size_t chunk_schedule_sort_count{ 0 };
 		int max_supported_sh_degree{ 0 };
 	};
 

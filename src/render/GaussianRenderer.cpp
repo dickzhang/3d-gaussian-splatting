@@ -251,9 +251,10 @@ namespace gs
 		const bool compositeOk = m_compositeProgram.createFromFiles("assets/shaders/composite.vert", "assets/shaders/composite.frag");
 		const bool schedulerOk = m_chunkSchedulerPipeline.initialize();
 		const bool scheduleCompactionOk = m_scheduleCompactionPipeline.initialize();
+		const bool scheduleSortInitOk = m_scheduleSortInitPipeline.initialize();
 		const bool viewDataOk = m_viewDataPipeline.initialize();
 
-		if (!drawOk || !depthOk || !sortOk || !compositeOk || !schedulerOk || !scheduleCompactionOk || !viewDataOk)
+		if (!drawOk || !depthOk || !sortOk || !compositeOk || !schedulerOk || !scheduleCompactionOk || !scheduleSortInitOk || !viewDataOk)
 		{
 			std::cerr << "Failed to initialize shader programs\n";
 			return false;
@@ -271,6 +272,8 @@ namespace gs
 		m_depthInputLayoutLoc = glGetUniformLocation(m_depthProgram.id(), "u_inputLayout");
 		m_depthUseSeedIndicesLoc = glGetUniformLocation(m_depthProgram.id(), "u_useSeedIndices");
 		m_depthUseScheduleDomainLoc = glGetUniformLocation(m_depthProgram.id(), "u_useScheduleDomain");
+		m_depthScheduleEntriesSortedLoc = glGetUniformLocation(m_depthProgram.id(), "u_scheduleEntriesSorted");
+		m_depthUseSortedScheduleLookupLoc = glGetUniformLocation(m_depthProgram.id(), "u_useSortedScheduleLookup");
 
 		m_sortCountLoc = glGetUniformLocation(m_sortProgram.id(), "u_count");
 		m_sortStageLoc = glGetUniformLocation(m_sortProgram.id(), "u_stage");
@@ -289,6 +292,8 @@ namespace gs
 			m_depthInputLayoutLoc >= 0 &&
 			m_depthUseSeedIndicesLoc >= 0 &&
 			m_depthUseScheduleDomainLoc >= 0 &&
+			m_depthScheduleEntriesSortedLoc >= 0 &&
+			m_depthUseSortedScheduleLookupLoc >= 0 &&
 			m_sortCountLoc >= 0 &&
 			m_sortStageLoc >= 0 &&
 			m_sortPassLoc >= 0 &&
@@ -344,6 +349,7 @@ namespace gs
 		m_totalSplatCount = stats.splat_count;
 		m_activeSplatCount = stats.splat_count;
 		m_sortCapacity = stats.sort_count;
+		m_scheduleSortCapacity = stats.chunk_schedule_sort_count;
 		m_sortCount = stats.sort_count;
 		m_chunkCount = stats.chunk_count;
 		m_visibleChunkCount = stats.chunk_count;
@@ -356,6 +362,7 @@ namespace gs
 		m_hasChunkSchedulingSupport = !m_chunks.empty();
 		m_useSeededIndicesThisFrame = m_hasChunkSchedulingSupport;
 		m_usedGpuSchedulerThisFrame = false;
+		m_useSortedScheduleLookupThisFrame = false;
 		m_visibleScheduleScratch.clear();
 		m_visibleScheduleScratch.reserve(m_chunkCount);
 
@@ -428,6 +435,7 @@ namespace gs
 		GLint prevSsbo6 = 0;
 		GLint prevSsbo7 = 0;
 		GLint prevSsbo8 = 0;
+		GLint prevSsbo10 = 0;
 		glGetIntegeri_v(GL_SHADER_STORAGE_BUFFER_BINDING, 0, &prevSsbo0);
 		glGetIntegeri_v(GL_SHADER_STORAGE_BUFFER_BINDING, 1, &prevSsbo1);
 		glGetIntegeri_v(GL_SHADER_STORAGE_BUFFER_BINDING, 2, &prevSsbo2);
@@ -437,6 +445,7 @@ namespace gs
 		glGetIntegeri_v(GL_SHADER_STORAGE_BUFFER_BINDING, 6, &prevSsbo6);
 		glGetIntegeri_v(GL_SHADER_STORAGE_BUFFER_BINDING, 7, &prevSsbo7);
 		glGetIntegeri_v(GL_SHADER_STORAGE_BUFFER_BINDING, 8, &prevSsbo8);
+		glGetIntegeri_v(GL_SHADER_STORAGE_BUFFER_BINDING, 10, &prevSsbo10);
 
 		const bool depthAndSortExecuted = prepareVisibleSplatDomain(view, projection);
 		bool canDraw = depthAndSortExecuted && m_activeSplatCount > 0;
@@ -529,6 +538,7 @@ namespace gs
 						m_chunkSchedulerMode == ChunkSchedulerMode::Cpu ? "cpu" :
 						m_chunkSchedulerMode == ChunkSchedulerMode::Gpu ? "gpu" :
 						m_chunkSchedulerMode == ChunkSchedulerMode::Full ? "full" : "auto") +
+					" force_seeded=" + std::string(m_forceSeededPath ? "1" : "0") +
 					" enable_ratio=" + std::to_string(m_chunkSchedulingEnableVisibleRatio) +
 					" disable_ratio=" + std::to_string(m_chunkSchedulingDisableVisibleRatio));
 			}
@@ -543,6 +553,12 @@ namespace gs
 				" compacted_splats=" + std::to_string(m_compactedSplatCount) +
 				" producer=" + std::string(m_usedGpuSchedulerThisFrame ? "gpu" : "cpu") +
 				" path=" + std::string(m_useSeededIndicesThisFrame ? "seeded" : "full") +
+					" schedule_lookup=" + std::string(
+						m_useSeededIndicesThisFrame
+							? (m_useSortedScheduleLookupThisFrame ? "indirect" :
+								(m_scheduleEntriesSortedThisFrame ? "direct" : "fallback"))
+							: "full") +
+					" force_seeded=" + std::string(m_forceSeededPath ? "1" : "0") +
 					" visible_ratio=" + std::to_string(m_lastVisibleRatio) +
 				" active_splats=" + std::to_string(m_activeSplatCount) +
 				" active_sort_count=" + std::to_string(m_sortCount) +
@@ -564,6 +580,7 @@ namespace gs
 		glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 6, static_cast<GLuint>(prevSsbo6));
 		glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 7, static_cast<GLuint>(prevSsbo7));
 		glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 8, static_cast<GLuint>(prevSsbo8));
+		glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 10, static_cast<GLuint>(prevSsbo10));
 
 		glDepthMask(wasDepthWrite);
 		glBlendFuncSeparate(
@@ -759,6 +776,7 @@ namespace gs
 			m_chunkSchedulerMode = ChunkSchedulerMode::Auto;
 		}
 
+		m_forceSeededPath = readEnvironmentFlag("GS_CHUNK_FORCE_SEEDED_PATH");
 		m_validateGpuCompaction = readEnvironmentFlag("GS_VALIDATE_GPU_COMPACTION");
 	}
 
@@ -767,10 +785,19 @@ namespace gs
 		m_activeSplatCount = m_totalSplatCount;
 		m_sortCount = m_sortCapacity;
 		m_useSeededIndicesThisFrame = false;
+		m_depthUseScheduleDomainThisFrame = false;
+		m_scheduleEntriesSortedThisFrame = false;
+		m_useSortedScheduleLookupThisFrame = false;
+		m_viewDataUseScheduleDomainThisFrame = false;
 	}
 
 	bool GaussianRenderer::shouldUseSeededIndices(bool previousSeededPath, float visibleRatio) const noexcept
 	{
+		if (m_forceSeededPath)
+		{
+			return true;
+		}
+
 		const double ratio = static_cast<double>(visibleRatio);
 		return previousSeededPath
 			? ratio < static_cast<double>(m_chunkSchedulingDisableVisibleRatio)
@@ -786,6 +813,68 @@ namespace gs
 			m_sortCount);
 	}
 
+	bool GaussianRenderer::runBitonicSort(GLuint keyBuffer, GLuint indexBuffer, std::size_t count)
+	{
+		if (count <= 1)
+		{
+			return true;
+		}
+
+		if (count > static_cast<std::size_t>(std::numeric_limits<GLuint>::max()))
+		{
+			return false;
+		}
+
+		m_sortProgram.use();
+		glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 0, keyBuffer);
+		glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 1, indexBuffer);
+		glUniform1ui(m_sortCountLoc, static_cast<GLuint>(count));
+
+		const GLuint groups = dispatchGroupCount(count);
+		const GLuint sortCount = static_cast<GLuint>(count);
+		for (GLuint stage = 2; stage <= sortCount && stage != 0; stage <<= 1)
+		{
+			glUniform1ui(m_sortStageLoc, stage);
+			for (GLuint pass = stage >> 1; pass > 0; pass >>= 1)
+			{
+				glUniform1ui(m_sortPassLoc, pass);
+				glDispatchCompute(groups, 1, 1);
+				glMemoryBarrier(GL_SHADER_STORAGE_BARRIER_BIT);
+			}
+		}
+
+		return glGetError() == GL_NO_ERROR;
+	}
+
+	bool GaussianRenderer::prepareSortedScheduleLookup(std::size_t scheduleEntryCount)
+	{
+		if (scheduleEntryCount == 0)
+		{
+			return true;
+		}
+
+		if (m_scheduleSortCapacity == 0 || scheduleEntryCount > m_scheduleSortCapacity)
+		{
+			return false;
+		}
+
+		const std::size_t paddedScheduleEntryCount = nextPow2(scheduleEntryCount);
+		if (paddedScheduleEntryCount > m_scheduleSortCapacity)
+		{
+			return false;
+		}
+
+		if (!m_scheduleSortInitPipeline.dispatch(m_uploadBuffers, scheduleEntryCount, paddedScheduleEntryCount))
+		{
+			return false;
+		}
+
+		return runBitonicSort(
+			m_uploadBuffers.chunk_schedule_sort_keys_buffer,
+			m_uploadBuffers.chunk_schedule_sort_indices_buffer,
+			paddedScheduleEntryCount);
+	}
+
 	bool GaussianRenderer::prepareVisibleSplatDomain(const glm::mat4& view, const glm::mat4& projection)
 	{
 		const bool previousSeededPath = m_useSeededIndicesThisFrame;
@@ -796,6 +885,8 @@ namespace gs
 		m_lastVisibleRatio = m_totalSplatCount == 0 ? 0.0f : 1.0f;
 		m_usedGpuSchedulerThisFrame = false;
 		m_depthUseScheduleDomainThisFrame = false;
+		m_scheduleEntriesSortedThisFrame = false;
+		m_useSortedScheduleLookupThisFrame = false;
 		m_viewDataUseScheduleDomainThisFrame = false;
 
 		if (!m_hasChunkSchedulingSupport)
@@ -883,6 +974,8 @@ namespace gs
 			m_sortCount = 0;
 			m_useSeededIndicesThisFrame = true;
 			m_depthUseScheduleDomainThisFrame = true;
+			m_scheduleEntriesSortedThisFrame = true;
+			m_useSortedScheduleLookupThisFrame = false;
 			m_viewDataUseScheduleDomainThisFrame = true;
 			return true;
 		}
@@ -896,6 +989,8 @@ namespace gs
 		m_activeSplatCount = m_compactedSplatCount;
 		m_useSeededIndicesThisFrame = true;
 		m_depthUseScheduleDomainThisFrame = true;
+		m_scheduleEntriesSortedThisFrame = true;
+		m_useSortedScheduleLookupThisFrame = false;
 		m_viewDataUseScheduleDomainThisFrame = true;
 
 		m_sortCount = nextPow2(m_activeSplatCount);
@@ -974,6 +1069,8 @@ namespace gs
 			m_sortCount = 0;
 			m_useSeededIndicesThisFrame = true;
 			m_depthUseScheduleDomainThisFrame = true;
+			m_scheduleEntriesSortedThisFrame = false;
+			m_useSortedScheduleLookupThisFrame = false;
 			m_viewDataUseScheduleDomainThisFrame = true;
 		}
 		else if (!shouldUseSeededIndices(previousSeededPath, m_lastVisibleRatio))
@@ -985,12 +1082,19 @@ namespace gs
 			m_activeSplatCount = m_compactedSplatCount;
 			m_useSeededIndicesThisFrame = true;
 			m_depthUseScheduleDomainThisFrame = true;
+			m_scheduleEntriesSortedThisFrame = false;
+			m_useSortedScheduleLookupThisFrame = false;
 			m_viewDataUseScheduleDomainThisFrame = true;
 			m_sortCount = nextPow2(m_activeSplatCount);
 			if (m_sortCount > m_sortCapacity)
 			{
 				resetActiveDomainToFull();
 			}
+		}
+
+		if (m_useSeededIndicesThisFrame && m_activeSplatCount > 0 && prepareSortedScheduleLookup(m_visibleScheduleEntryCount))
+		{
+			m_useSortedScheduleLookupThisFrame = true;
 		}
 
 		if (m_useSeededIndicesThisFrame && m_activeSplatCount > 0 && !runScheduleCompaction(m_visibleScheduleEntryCount))
@@ -1047,6 +1151,10 @@ namespace gs
 		}
 
 		const std::size_t expectedCompactedCount = expectedIndices.size();
+		if (expectedCompactedCount > 0)
+		{
+			std::sort(expectedIndices.begin(), expectedIndices.end());
+		}
 		const float expectedVisibleRatio =
 			m_totalSplatCount == 0 ? 0.0f : static_cast<float>(static_cast<double>(expectedCompactedCount) / static_cast<double>(m_totalSplatCount));
 
@@ -1099,6 +1207,8 @@ namespace gs
 				}
 				return false;
 			}
+
+			std::sort(gpuIndices.begin(), gpuIndices.end());
 		}
 
 		const bool countsMatch =
@@ -1170,6 +1280,8 @@ namespace gs
 			m_maxPointSize,
 			activeDomainPreculled,
 			m_viewDataUseScheduleDomainThisFrame,
+			m_scheduleEntriesSortedThisFrame,
+			m_useSortedScheduleLookupThisFrame,
 			m_useAnisotropic,
 			m_shDegree,
 			m_chunkCount,
@@ -1190,11 +1302,14 @@ namespace gs
 		glUniform1i(m_depthInputLayoutLoc, m_inputLayout);
 		glUniform1i(m_depthUseSeedIndicesLoc, m_useSeededIndicesThisFrame ? 1 : 0);
 		glUniform1i(m_depthUseScheduleDomainLoc, m_depthUseScheduleDomainThisFrame ? 1 : 0);
+		glUniform1i(m_depthScheduleEntriesSortedLoc, m_scheduleEntriesSortedThisFrame ? 1 : 0);
+		glUniform1i(m_depthUseSortedScheduleLookupLoc, m_useSortedScheduleLookupThisFrame ? 1 : 0);
 
 		glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 1, m_uploadBuffers.keys_buffer);
 		glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 2, m_uploadBuffers.indices_buffer);
 		glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 4, m_uploadBuffers.chunk_buffer);
 		glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 5, m_uploadBuffers.chunk_schedule_buffer);
+		glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 10, m_uploadBuffers.chunk_schedule_sort_indices_buffer);
 		if (m_inputLayout == 0)
 		{
 			glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 0, m_uploadBuffers.splat_buffer);
@@ -1210,21 +1325,9 @@ namespace gs
 		glDispatchCompute(groups, 1, 1);
 		glMemoryBarrier(GL_SHADER_STORAGE_BARRIER_BIT);
 
-		m_sortProgram.use();
-		glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 0, m_uploadBuffers.keys_buffer);
-		glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 1, m_uploadBuffers.indices_buffer);
-		glUniform1ui(m_sortCountLoc, static_cast<GLuint>(m_sortCount));
-
-		const GLuint sortCount = static_cast<GLuint>(m_sortCount);
-		for (GLuint stage = 2; stage <= sortCount && stage != 0; stage <<= 1)
+		if (!runBitonicSort(m_uploadBuffers.keys_buffer, m_uploadBuffers.indices_buffer, m_sortCount))
 		{
-			glUniform1ui(m_sortStageLoc, stage);
-			for (GLuint pass = stage >> 1; pass > 0; pass >>= 1)
-			{
-				glUniform1ui(m_sortPassLoc, pass);
-				glDispatchCompute(groups, 1, 1);
-				glMemoryBarrier(GL_SHADER_STORAGE_BARRIER_BIT);
-			}
+			std::cerr << "Bitonic sort failed during depth sort pass\n";
 		}
 	}
 

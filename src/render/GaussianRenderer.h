@@ -12,6 +12,7 @@
 #include "render/GpuSplatLayout.h"
 #include "render/GpuUploadBuffers.h"
 #include "render/ScheduleCompactionPipeline.h"
+#include "render/ScheduleSortInitPipeline.h"
 #include "render/ViewDataPipeline.h"
 #include "runtime/RuntimeSplatAsset.h"
 
@@ -56,7 +57,9 @@ namespace gs
 		bool prepareVisibleSplatDomain(const glm::mat4& view, const glm::mat4& projection);
 		bool prepareVisibleSplatDomainCpu(const glm::mat4& view, const glm::mat4& projection, bool previousSeededPath);
 		bool prepareVisibleSplatDomainGpu(const glm::mat4& view, const glm::mat4& projection, bool previousSeededPath);
+		bool prepareSortedScheduleLookup(std::size_t scheduleEntryCount);
 		bool runScheduleCompaction(std::size_t scheduleEntryCount);
+		bool runBitonicSort(GLuint keyBuffer, GLuint indexBuffer, std::size_t count);
 		bool validateGpuCompactionResult(
 			const glm::mat4& view,
 			const glm::mat4& projection,
@@ -86,6 +89,7 @@ namespace gs
 		ShaderProgram m_compositeProgram; // 合成程序
 		ChunkSchedulerPipeline m_chunkSchedulerPipeline; // chunk 调度计算管线
 		ScheduleCompactionPipeline m_scheduleCompactionPipeline; // schedule 展开到 indices 的压缩管线
+		ScheduleSortInitPipeline m_scheduleSortInitPipeline; // schedule 排序键初始化管线
 		ViewDataPipeline m_viewDataPipeline; // 视图预计算管线
 
 		bool m_initialized{ false };    // 初始化状态
@@ -103,6 +107,7 @@ namespace gs
 		std::size_t m_totalSplatCount{ 0 }; // 上传资产的总 splat 数量
 		std::size_t m_activeSplatCount{ 0 }; // 当前帧参与排序/绘制的 splat 数量
 		std::size_t m_sortCapacity{ 0 }; // indices/keys buffer 的容量（2 的幂）
+		std::size_t m_scheduleSortCapacity{ 0 }; // schedule 排序键/索引缓冲容量（2 的幂）
 		std::size_t m_sortCount{ 0 };  // 当前帧排序数量（2 的幂）
 		std::size_t m_chunkCount{ 0 }; // chunk 总数量
 		std::size_t m_visibleChunkCount{ 0 }; // 当前帧可见 chunk 数量
@@ -110,6 +115,8 @@ namespace gs
 		std::size_t m_compactedSplatCount{ 0 }; // 当前帧 compacted splat 数量（策略前）
 		float m_lastVisibleRatio{ 1.0f }; // 当前帧可见 splat 占总量的比例
 		bool m_depthUseScheduleDomainThisFrame{ false }; // 当前帧 depth pass 是否直接消费 schedule 域
+		bool m_scheduleEntriesSortedThisFrame{ false }; // 当前帧 schedule entries 是否按 outputOffset 有序
+		bool m_useSortedScheduleLookupThisFrame{ false }; // 当前帧是否使用 sorted schedule index 间接查表
 		bool m_viewDataUseScheduleDomainThisFrame{ false }; // 当前帧 view-data 是否直接消费 schedule 域
 
 		GLint m_drawViewportSizeLoc{ -1 }; // 绘制程序 u_viewportSize 位置
@@ -124,6 +131,8 @@ namespace gs
 		GLint m_depthInputLayoutLoc{ -1 };  // 深度程序 u_inputLayout 位置
 		GLint m_depthUseSeedIndicesLoc{ -1 }; // 深度程序 u_useSeedIndices 位置
 		GLint m_depthUseScheduleDomainLoc{ -1 }; // 深度程序 u_useScheduleDomain 位置
+		GLint m_depthScheduleEntriesSortedLoc{ -1 }; // 深度程序 u_scheduleEntriesSorted 位置
+		GLint m_depthUseSortedScheduleLookupLoc{ -1 }; // 深度程序 u_useSortedScheduleLookup 位置
 
 		GLint m_sortCountLoc{ -1 };  // 排序程序 u_count 位置
 		GLint m_sortStageLoc{ -1 };  // 排序程序 u_stage 位置
@@ -138,6 +147,7 @@ namespace gs
 		bool m_loggedChunkSchedulingConfig{ false }; // 是否已输出 chunk 调度配置
 		bool m_hasChunkSchedulingSupport{ false }; // 当前资产是否支持 chunk 驱动调度
 		bool m_useSeededIndicesThisFrame{ false }; // 当前帧是否启用 seeded indices 缩减排序域
+		bool m_forceSeededPath{ false }; // 是否强制走 seeded/schedule downstream 调试路径
 		bool m_usedGpuSchedulerThisFrame{ false }; // 当前帧是否使用 GPU scheduler 生成 active domain
 		bool m_validateGpuCompaction{ false }; // 是否启用 GPU compaction CPU/GPU 对照验证
 		std::uint64_t m_renderFrameIndex{ 0 }; // 渲染帧序号

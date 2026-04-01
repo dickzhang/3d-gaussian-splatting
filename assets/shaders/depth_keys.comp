@@ -50,6 +50,10 @@ layout(std430, binding = 5) readonly buffer ScheduleBuffer {
     ChunkScheduleEntry scheduleEntries[];
 };
 
+layout(std430, binding = 10) readonly buffer SortedScheduleIndexBuffer {
+    uint sortedScheduleIndices[];
+};
+
 uniform mat4 u_view;
 uniform mat4 u_model;
 uniform uint u_realCount;
@@ -59,6 +63,17 @@ uniform uint u_scheduleEntryCount;
 uniform int u_inputLayout;
 uniform int u_useSeedIndices;
 uniform int u_useScheduleDomain;
+uniform int u_scheduleEntriesSorted;
+uniform int u_useSortedScheduleLookup;
+
+ChunkScheduleEntry loadScheduleEntry(uint logicalIndex) {
+    uint scheduleIndex = logicalIndex;
+    if (u_useSortedScheduleLookup != 0) {
+        scheduleIndex = sortedScheduleIndices[logicalIndex];
+    }
+
+    return scheduleEntries[scheduleIndex];
+}
 
 int findScheduleIndex(uint compactedIndex) {
     if (u_scheduleEntryCount == 0u) {
@@ -69,8 +84,9 @@ int findScheduleIndex(uint compactedIndex) {
     uint right = u_scheduleEntryCount;
     while (left < right) {
         uint mid = left + ((right - left) >> 1u);
-        uint startOffset = scheduleEntries[mid].outputOffset;
-        uint endOffset = startOffset + scheduleEntries[mid].splatCount;
+        ChunkScheduleEntry schedule = loadScheduleEntry(mid);
+        uint startOffset = schedule.outputOffset;
+        uint endOffset = startOffset + schedule.splatCount;
         if (compactedIndex < startOffset) {
             right = mid;
         } else if (compactedIndex >= endOffset) {
@@ -96,23 +112,29 @@ void main() {
     }
 
     uint sourceIndex = id;
+    uint compactedIndex = id;
     if (u_useScheduleDomain != 0) {
-        int scheduleIndex = findScheduleIndex(id);
-        if (scheduleIndex < 0) {
-            keys[id] = 0xFFFFFFFFu;
-            indices[id] = 0xFFFFFFFFu;
-            return;
-        }
+        if (u_scheduleEntriesSorted != 0 || u_useSortedScheduleLookup != 0) {
+            int scheduleIndex = findScheduleIndex(compactedIndex);
+            if (scheduleIndex < 0) {
+                keys[id] = 0xFFFFFFFFu;
+                indices[id] = 0xFFFFFFFFu;
+                return;
+            }
 
-        ChunkScheduleEntry schedule = scheduleEntries[scheduleIndex];
-        if (schedule.chunkIndex >= u_chunkCount) {
-            keys[id] = 0xFFFFFFFFu;
-            indices[id] = 0xFFFFFFFFu;
-            return;
-        }
+            ChunkScheduleEntry schedule = loadScheduleEntry(uint(scheduleIndex));
+            if (schedule.chunkIndex >= u_chunkCount) {
+                keys[id] = 0xFFFFFFFFu;
+                indices[id] = 0xFFFFFFFFu;
+                return;
+            }
 
-        uint localOffset = id - schedule.outputOffset;
-        sourceIndex = chunks[schedule.chunkIndex].rangeData.x + localOffset;
+            uint localOffset = compactedIndex - schedule.outputOffset;
+            sourceIndex = chunks[schedule.chunkIndex].rangeData.x + localOffset;
+        } else {
+            sourceIndex = indices[id];
+            compactedIndex = sourceIndex;
+        }
     } else if (u_useSeedIndices != 0) {
         // Legacy seeded path using the pre-expanded visible splat subset.
         sourceIndex = indices[id];
@@ -131,5 +153,7 @@ void main() {
     uint bits = floatBitsToUint(depth);
 
     keys[id] = bits;
-    indices[id] = sourceIndex;
+    indices[id] = u_useScheduleDomain != 0 && (u_scheduleEntriesSorted != 0 || u_useSortedScheduleLookup != 0)
+        ? compactedIndex
+        : sourceIndex;
 }

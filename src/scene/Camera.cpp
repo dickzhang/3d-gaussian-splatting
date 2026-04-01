@@ -16,6 +16,7 @@ namespace gs
 		m_pitch(0),
 		m_fovDeg(60.0f),
 		m_firstMouse(true),
+		m_mouseCaptured(false),
 		m_lastMouseX(0.0),
 		m_lastMouseY(0.0)
 	{
@@ -25,6 +26,7 @@ namespace gs
 	{
 		const float speed = 4.0f;
 		const float sensitivity = 0.08f;
+		const bool windowFocused = glfwGetWindowAttrib(window, GLFW_FOCUSED) == GLFW_TRUE;
 
 		const glm::vec3 forward = computeForward();
 
@@ -55,7 +57,29 @@ namespace gs
 			m_position.y -= speed * dt;
 		}
 
-		if (glfwGetMouseButton(window, GLFW_MOUSE_BUTTON_RIGHT) == GLFW_PRESS)
+		const bool rotatePressed = windowFocused && glfwGetMouseButton(window, GLFW_MOUSE_BUTTON_RIGHT) == GLFW_PRESS;
+		if (rotatePressed && !m_mouseCaptured)
+		{
+			glfwSetInputMode(window, GLFW_CURSOR, GLFW_CURSOR_DISABLED);
+			if (glfwRawMouseMotionSupported())
+			{
+				glfwSetInputMode(window, GLFW_RAW_MOUSE_MOTION, GLFW_TRUE);
+			}
+			m_mouseCaptured = true;
+			m_firstMouse = true;
+		}
+		else if (!rotatePressed && m_mouseCaptured)
+		{
+			if (glfwRawMouseMotionSupported())
+			{
+				glfwSetInputMode(window, GLFW_RAW_MOUSE_MOTION, GLFW_FALSE);
+			}
+			glfwSetInputMode(window, GLFW_CURSOR, GLFW_CURSOR_NORMAL);
+			m_mouseCaptured = false;
+			m_firstMouse = true;
+		}
+
+		if (rotatePressed)
 		{
 			double mouseX = 0.0;
 			double mouseY = 0.0;
@@ -74,7 +98,7 @@ namespace gs
 			m_lastMouseY = mouseY;
 
 			m_yaw += offsetX * sensitivity;
-			m_pitch += offsetY * sensitivity;
+			m_pitch = std::clamp(m_pitch + offsetY * sensitivity, -89.0f, 89.0f);
 		}
 		else
 		{
@@ -103,10 +127,14 @@ namespace gs
 		{
 			return;
 		}
+		if (!std::isfinite(value.yaw) || !std::isfinite(value.pitch))
+		{
+			return;
+		}
 
 		m_position = value.position;
 		m_yaw = value.yaw;
-		m_pitch = value.pitch;
+		m_pitch = std::clamp(value.pitch, -89.0f, 89.0f);
 		m_firstMouse = true;
 	}
 

@@ -44,6 +44,7 @@ add_executable(gaussian_splatting_gl
   src/render/GpuUploadBuffers.cpp
   src/render/ChunkSchedulerPipeline.cpp
   src/render/ScheduleCompactionPipeline.cpp
+  src/render/ScheduleSortInitPipeline.cpp
   src/render/ViewDataPipeline.cpp
   src/render/GaussianRenderer.cpp
 )

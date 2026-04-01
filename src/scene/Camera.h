@@ -47,6 +47,7 @@ namespace gs
 		float m_pitch;        // 俯仰角
 		float m_fovDeg;       // 垂直视场角（度）
 		bool m_firstMouse;    // 右键旋转时是否为首帧
+		bool m_mouseCaptured; // 右键旋转期间是否已捕获鼠标
 		double m_lastMouseX;  // 上一帧鼠标 X
 		double m_lastMouseY;  // 上一帧鼠标 Y
 	};

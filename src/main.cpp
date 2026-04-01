@@ -239,6 +239,12 @@ int main()
 		float prevTime = static_cast<float>(glfwGetTime());
 		while (!glfwWindowShouldClose(window))
 		{
+			glfwPollEvents();
+			if (glfwWindowShouldClose(window))
+			{
+				break;
+			}
+
 			const float now = static_cast<float>(glfwGetTime());
 			const float dt = now - prevTime;
 			prevTime = now;
@@ -253,7 +259,6 @@ int main()
 			renderer.render(camera.viewMatrix(), camera.projectionMatrix(aspect), static_cast<float>(width), static_cast<float>(height));
 
 			glfwSwapBuffers(window);
-			glfwPollEvents();
 		}
 
 		glfwDestroyWindow(window);

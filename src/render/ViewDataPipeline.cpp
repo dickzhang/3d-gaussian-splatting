@@ -30,6 +30,8 @@ namespace gs
 		m_max_point_size_loc = glGetUniformLocation(m_program.id(), "u_maxPointSize");
 		m_active_domain_preculled_loc = glGetUniformLocation(m_program.id(), "u_activeDomainPreculled");
 		m_use_schedule_domain_loc = glGetUniformLocation(m_program.id(), "u_useScheduleDomain");
+		m_schedule_entries_sorted_loc = glGetUniformLocation(m_program.id(), "u_scheduleEntriesSorted");
+		m_use_sorted_schedule_lookup_loc = glGetUniformLocation(m_program.id(), "u_useSortedScheduleLookup");
 		m_use_anisotropic_loc = glGetUniformLocation(m_program.id(), "u_useAnisotropic");
 		m_camera_pos_loc = glGetUniformLocation(m_program.id(), "u_cameraPos");
 		m_sh_degree_loc = glGetUniformLocation(m_program.id(), "u_shDegree");
@@ -46,6 +48,8 @@ namespace gs
 			m_max_point_size_loc >= 0 &&
 			m_active_domain_preculled_loc >= 0 &&
 			m_use_schedule_domain_loc >= 0 &&
+			m_schedule_entries_sorted_loc >= 0 &&
+			m_use_sorted_schedule_lookup_loc >= 0 &&
 			m_use_anisotropic_loc >= 0 &&
 			m_camera_pos_loc >= 0 &&
 			m_sh_degree_loc >= 0 &&
@@ -74,6 +78,8 @@ namespace gs
 		float max_point_size,
 		bool active_domain_preculled,
 		bool use_schedule_domain,
+		bool schedule_entries_sorted,
+		bool use_sorted_schedule_lookup,
 		bool use_anisotropic,
 		int sh_degree,
 		std::size_t chunk_count,
@@ -140,6 +146,8 @@ namespace gs
 		glUniform1f(m_max_point_size_loc, max_point_size);
 		glUniform1i(m_active_domain_preculled_loc, active_domain_preculled ? 1 : 0);
 		glUniform1i(m_use_schedule_domain_loc, use_schedule_domain ? 1 : 0);
+		glUniform1i(m_schedule_entries_sorted_loc, schedule_entries_sorted ? 1 : 0);
+		glUniform1i(m_use_sorted_schedule_lookup_loc, use_sorted_schedule_lookup ? 1 : 0);
 		glUniform1i(m_use_anisotropic_loc, use_anisotropic ? 1 : 0);
 		glUniform3f(m_camera_pos_loc, camera_pos.x, camera_pos.y, camera_pos.z);
 		glUniform1i(m_sh_degree_loc, sh_degree);
@@ -159,6 +167,7 @@ namespace gs
 		glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 1, handles.indices_buffer);
 		glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 2, handles.view_data_buffer);
 		glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 9, handles.chunk_schedule_buffer);
+		glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 10, handles.chunk_schedule_sort_indices_buffer);
 		glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 8, handles.view_stats_buffer);
 		if (input_layout == 0)
 		{

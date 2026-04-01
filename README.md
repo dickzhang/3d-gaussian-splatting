@@ -85,15 +85,16 @@ cmake --build build --config Release
 - 可见比例 `>= 0.90`：退回 full-domain 路径
 - 中间区间：保持上一帧路径，避免频繁抖动
 
-当前调度会先以 chunk 为粒度生成 `scheduled_ranges`，并统一通过 GPU `schedule_compact` pass 展开到 `indices_buffer`，再供既有 depth/sort 路径消费。这意味着主路径已经去掉了每帧 CPU 逐 splat visible-index 构建与上传热路径；producer 端与 compaction 端现在都在 GPU 上完成。进一步地，seeded path 下的 `view_data.comp` 现在已经可以直接按 `scheduled_ranges` 反查所属 chunk，而不必再依赖“先展开后的 flat active domain”去重新定位 chunk。
+当前调度会先以 chunk 为粒度生成 `scheduled_ranges`，并统一通过 GPU `schedule_compact` pass 展开到 `indices_buffer`，再供既有 depth/sort 路径消费。这意味着主路径已经去掉了每帧 CPU 逐 splat visible-index 构建与上传热路径；producer 端与 compaction 端现在都在 GPU 上完成。当前 downstream 的真实语义是：CPU 生成的 schedule 若按 `outputOffset` 有序，可直接按 `scheduled_ranges` 二分反查 chunk；GPU 生成的 schedule 会额外构建一份“按 `outputOffset` 排序后的 schedule 索引表”，depth/view-data 通过这份索引表做间接二分查找，从而在 seeded path 上继续直接消费 schedule domain，而不是再退回 `findChunkIndex()` 粗查路径。仅当这一步排序准备失败时，才回退为消费已经 compact 完成的 `indices_buffer` / `sortedIndices`。
 
 ### 环境变量
 
 - `GS_RUNTIME_LOG_FILE`：可选。若设置为文件路径，运行时会把关键启动/验收日志追加写入该文件。
-- `GS_DEBUG_CHUNKS`：可选。设为 `1` 后，运行时会定期输出 chunk 调试统计，包括 `producer`、`path`、`visible_ratio`、`visible_chunks`、`scheduled_ranges`、`compacted_splats`、`active_splats`、`active_sort_count`、`processed_splats`、`chunk_tests` 与 `chunk_culled_splats`。
+- `GS_DEBUG_CHUNKS`：可选。设为 `1` 后，运行时会定期输出 chunk 调试统计，包括 `producer`、`path`、`schedule_lookup`、`visible_ratio`、`visible_chunks`、`scheduled_ranges`、`compacted_splats`、`active_splats`、`active_sort_count`、`processed_splats`、`chunk_tests` 与 `chunk_culled_splats`。
 - `GS_CHUNK_ENABLE_RATIO`：可选。覆盖 seeded path 的启用阈值，范围 `[0, 1]`。
 - `GS_CHUNK_DISABLE_RATIO`：可选。覆盖 seeded path 的退出阈值，范围 `[0, 1]`，且必须大于 `GS_CHUNK_ENABLE_RATIO`。
 - `GS_CHUNK_SCHEDULER_MODE`：可选。支持 `auto`、`cpu`、`gpu`、`full`，用于现场比较 GPU compaction、CPU fallback 和 full-domain 行为。
+- `GS_CHUNK_FORCE_SEEDED_PATH`：可选。设为 `1` 后，只要当前帧成功生成了合法的 chunk schedule / compacted domain，就强制让 depth/view-data 下游走 seeded schedule-domain 路径，即使可见比例本来会按策略退回 full-domain。主要用于调试和验收，`GS_CHUNK_SCHEDULER_MODE=full` 时不会生效。
 
 说明：即使切到 `cpu` fallback 模式，当前也只是 CPU 生成可见 chunk schedule，再交给 GPU `schedule_compact` 展开，不再回退到每帧上传整段 visible indices。
 

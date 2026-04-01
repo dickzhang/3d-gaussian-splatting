@@ -1106,4 +1106,91 @@ src/
 ### 当前结论
 1. schedule 不再只停留在 producer/compaction 边界，已经继续下推到了 view-data pass。
 2. 当前真正仍然保留 flat `indices_buffer` 契约的下游主要是 depth/sort/draw，而 view-data 在 seeded path 上已经具备 schedule-aware 消费能力。
-3. 下一步若继续推进，最自然的方向是评估 depth/sort 是否也能进一步减少对展开后 flat indices 的依赖，或继续把 draw 侧推进为更原生的 schedule/range 驱动契约。
+
+## 强制 seeded downstream 调试开关（2026-04-01）
+
+### 本次改动
+1. `src/render/GaussianRenderer.h/.cpp`
+	- 新增环境变量 `GS_CHUNK_FORCE_SEEDED_PATH`，用于在当前帧已经成功生成合法 schedule/compacted domain 时，强制 depth/view-data 继续走 seeded schedule-domain 路径，而不是因高可见比例退回 full-domain。
+	- 将该策略接到现有 `shouldUseSeededIndices()` 判定中，使 CPU path、GPU path 与 `validateGpuCompactionResult()` 共用同一套 seeded/full 决策语义。
+	- `CHUNK_DEBUG_CONFIG` 与 `CHUNK_DEBUG` 日志新增 `force_seeded` 字段，便于区分“策略自然进入 seeded”与“调试强制进入 seeded”。
+2. `README.md`
+	- 文档补充 `GS_CHUNK_FORCE_SEEDED_PATH` 的用途与限制。
+
+### 验证目标
+1. 在当前默认 garden 场景 `visible_ratio=1.0` 的情况下，也能稳定把 downstream 切到 seeded path，真实观测 depth/view-data 对 schedule domain 的消费情况。
+2. 同时保留 `GS_VALIDATE_GPU_COMPACTION=1` 的 CPU/GPU 对照验证，避免强制模式把错误隐藏掉。
+
+### 继续修复
+1. 强制 seeded 验证首次暴露了一个真实契约问题：
+	- GPU scheduler 写出的 `scheduleEntries[]` 并不保证按 `outputOffset` 单调有序。
+	- 但 `depth_keys.comp` / `view_data.comp` 里的 `findScheduleIndex()` 默认用二分查找，隐含要求 `scheduleEntries[]` 已按 `outputOffset` 排序。
+	- 结果是在 GPU producer + seeded downstream 组合下，会出现 view-data 只处理部分 splat、或 GPU validation 因索引顺序假设过强而误报的情况。
+2. 已落实修复：
+	- `validateGpuCompactionResult()` 不再把 GPU compaction 的输出顺序当作硬约束，而是比较 source-index 集合是否一致。
+	- `GaussianRenderer` 新增 `m_scheduleEntriesSortedThisFrame`，区分 CPU schedule（按 outputOffset 有序）与 GPU schedule（无序）。
+	- `depth_keys.comp` 与 `view_data.comp` 仅在 `u_scheduleEntriesSorted=1` 时才走 schedule-entry 二分查找；否则回退为消费已经 compact 完成的 `indices_buffer` / `sortedIndices`，避免错误依赖“GPU schedule entry 数组天然有序”的假设。
+	- `resetActiveDomainToFull()` 现在会同时清理 depth/view-data 的 schedule-domain 状态，避免 seeded path 失败后带着旧标志退回 full-domain。
+
+### 本次验证结果
+1. `cmake --build build --config Release --target gaussian_splatting_gl` 通过。
+2. 基线日志（不强制 seeded）确认：
+	- `producer=gpu`
+	- `path=full`
+	- `visible_ratio=1.0`
+	- `chunk_tests=5834784`
+3. 强制 seeded 日志确认：
+	- `producer=gpu`
+	- `path=seeded`
+	- `force_seeded=1`
+	- `visible_ratio=1.0`
+	- `processed_splats=5834784`
+	- `chunk_tests=0`
+	- `GPU_COMPACTION_VALIDATE_OK` 稳定出现
+
+### 当前结论
+1. 当前默认 garden 场景下，已经可以在不改变可见比例的前提下，稳定把 GPU producer 的结果继续下推到 seeded downstream 并完成运行时验收。
+2. 这次不是单纯新增一个调试开关，而是顺带修正了“GPU schedule entry 顺序天然可二分查找”这个错误前提。
+3. 当前 GPU producer 场景下，下游验证到的是“compacted-index fallback downstream”而不是“直接消费无序 schedule entry 数组”；这条语义现在已经在文档中明确。
+4. 现在可以更可信地继续推进真正的 schedule-aware downstream 优化，因为已经有办法在当前场景里稳定复现和验收 seeded path。
+5. 下一步若继续推进，最自然的方向是评估 depth/sort 是否也能进一步减少对展开后 flat indices 的依赖，或继续把 draw 侧推进为更原生的 schedule/range 驱动契约。
+
+## GPU sorted schedule lookup 下推（2026-04-01）
+
+### 本次改动
+1. `src/render/GpuUploadBuffers.h/.cpp`
+	- 新增 `chunk_schedule_sort_keys_buffer` 与 `chunk_schedule_sort_indices_buffer`，为每帧 GPU schedule lookup 排序提供独立缓冲。
+	- `GpuUploadStats` 新增 `chunk_schedule_sort_count`，把 schedule 排序容量回传给 renderer。
+2. 新增 `assets/shaders/schedule_sort_init.comp`
+	- 负责从 GPU scheduler 写出的 `scheduleEntries[]` 中提取 `outputOffset` 作为 sort key，并初始化 schedule 索引 payload。
+3. 新增 `src/render/ScheduleSortInitPipeline.h/.cpp`
+	- 封装 schedule sort key/index 初始化 dispatch。
+4. `src/render/GaussianRenderer.h/.cpp`
+	- 新增 `prepareSortedScheduleLookup()` 与通用 `runBitonicSort()`。
+	- GPU seeded path 现在会先对 schedule 索引按 `outputOffset` 做 GPU bitonic sort，再把结果通过 `m_useSortedScheduleLookupThisFrame` 下发给 depth/view-data。
+	- `CHUNK_DEBUG` 日志新增 `schedule_lookup` 字段，用于区分 `direct`、`indirect` 与 `fallback` 三种下游消费模式。
+	- render state 保护现在补上了 SSBO binding `10` 的保存与恢复，避免把 sorted schedule lookup buffer 泄漏到调用方 GL 状态。
+	- schedule 索引排序不再固定跑满 `nextPow2(total_chunk_count)`，而是按每帧 `visible schedule entry count` 的 padded 容量执行。
+5. `assets/shaders/depth_keys.comp`
+	- 当 schedule lookup 处于 direct/indirect 模式时，不再把 `indices[]` 当作 source index 载荷；而是把 compacted schedule index 作为排序 payload 保留下来，供 view-data 在排序后继续反查所属 schedule range。
+6. `assets/shaders/view_data.comp`
+	- 现在会在 GPU producer 场景下消费“按 `outputOffset` 排序后的 schedule 索引表”，通过 `sortedIndices[id] -> compactedIndex -> schedule range -> sourceIndex/chunkIndex` 这条链路恢复真正的 schedule-aware downstream。
+
+### 本次验证结果
+1. `cmake --build build --config Release --target gaussian_splatting_gl` 通过。
+2. 以 detached GUI 方式运行：
+	- `producer=gpu`
+	- `path=seeded`
+	- `schedule_lookup=indirect`
+	- `processed_splats=5834784`
+	- `chunk_tests=0`
+	- `GPU_COMPACTION_VALIDATE_OK` 稳定出现
+3. 在当前 harness 中，直接终端宿主启动查看器仍偶发 `Failed to upload split model buffers, GL error: 1285`；但 detached GUI 方式可稳定完成本轮验收。
+4. 这说明当前 garden 场景下，GPU producer 的结果已经不再依赖 compacted-index fallback，而是真正进入了“sorted schedule 索引间接查表”的 schedule-aware downstream。
+
+### 当前结论
+1. CPU path 现在有两种合法的 schedule downstream 形式：
+	- `schedule_lookup=direct`：CPU 直接生成有序 schedule entry，shader 可直接二分。
+	- `schedule_lookup=indirect`：GPU producer 先生成无序 schedule entry，再用 GPU 排序出按 `outputOffset` 有序的索引表，shader 间接二分。
+2. 只有当 schedule lookup 准备失败时，才需要回退到 compacted-index fallback。
+3. depth/view-data 这条链路现在已经更接近真正的 chunk schedule-aware downstream；后续如果继续推进，重点应转向 draw/domain 契约是否还需要 flat active-domain 语义。
